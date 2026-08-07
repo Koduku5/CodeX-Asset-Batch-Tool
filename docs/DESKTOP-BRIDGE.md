@@ -4,7 +4,7 @@
 
 WebView 只拿到项目 ID 和脱敏 DTO，不拿绝对路径、凭据、完整 Prompt、队列内容、锁令牌或进程控制能力。所有正式写入都通过固定业务接口完成；不存在 `execute(command)`、`writeFile(path)` 或任意参数脚本入口。
 
-桌面宿主是 .NET 8 WPF + WebView2，不是 WinForms。WebView 中运行 React 19 + Vite 8 构建产物，使用 Tailwind CSS 4、仓库内 shadcn 风格组件、Radix UI 交互原语和 Lucide 图标。上述前端实现不会扩大 Bridge 权限。
+桌面宿主是 .NET 10 WPF + WebView2，不是 WinForms。WebView 中运行 React 19 + Vite 8 构建产物，使用 Tailwind CSS 4、仓库内 shadcn 风格组件、Radix UI 交互原语和 Lucide 图标。上述前端实现不会扩大 Bridge 权限。
 
 ## WebView JSON-RPC
 

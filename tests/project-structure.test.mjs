@@ -19,8 +19,13 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'skills/ka-builtin-imagegen/SKILL.md',
     'src/ui/App.tsx',
     'src/ui/features/README.md',
+    'src/ui/features/workbench/workbench-app.tsx',
+    'src/ui/features/prompt-studio/prompt-studio-drawer.tsx',
     'src/ui/services',
     'src/server/server.mjs',
+    'src/server/routes/api-routes.mjs',
+    'src/server/routes/desktop-routes.mjs',
+    'src/server/routes/static-route.mjs',
     'src/server/codex-agent/analyze-screenplay.mjs',
     'src/server/codex-agent/build-world-overview.mjs',
     'src/server/codex-agent/complete-asset-visual-specs.mjs',
@@ -55,6 +60,9 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
   assert.match(workspace, /engineRoot/u);
 
   const project = await read('desktop/PromptStudio.Desktop/PromptStudio.Desktop.csproj');
+  assert.match(project, /<TargetFramework>net10\.0-windows<\/TargetFramework>/u);
+  assert.match(project, /<UseWPF>true<\/UseWPF>/u);
+  assert.match(project, /Microsoft\.Web\.WebView2/u);
   assert.match(project, /sidecar\\engine/u);
   assert.match(project, /sidecar\\skills/u);
   assert.match(project, /src\\server\\\*\*\\\*\.mjs/u);

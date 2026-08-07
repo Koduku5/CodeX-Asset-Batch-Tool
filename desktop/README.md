@@ -1,6 +1,6 @@
 # KA Prompt Studio 桌面壳
 
-`PromptStudio.Desktop` 是 .NET 8 WPF + WebView2 薄壳，不使用 WinForms。剧本、Cache、Excel、图片和 WebView2 数据都直接写在软件根：
+`PromptStudio.Desktop` 是 .NET 10 WPF + WebView2 薄壳，不使用 WinForms。剧本、Cache、Excel、图片和 WebView2 数据都直接写在软件根：
 
 ```text
 <软件项目根>\workspace\projects\<projectId>

@@ -21,8 +21,18 @@ const readUiFiles = async (relativeDirectory = 'src/ui') => {
 
 const readUiSource = async () => (await readUiFiles()).map(({ source }) => source).join('\n');
 
+const readWorkbenchSource = async () => (await Promise.all([
+  read('src/ui/features/workbench/workbench-foundation.tsx'),
+  read('src/ui/features/workbench/workbench-app.tsx')
+])).join('\n');
+
+const readWorkbenchAndStudioSource = async () => (await Promise.all([
+  readWorkbenchSource(),
+  read('src/ui/features/prompt-studio/prompt-studio-drawer.tsx')
+])).join('\n');
+
 const readComponentSource = async (name) => {
-  const marker = new RegExp(`^(?:export default )?function ${name}\\(`, 'mu');
+  const marker = new RegExp(`^(?:export (?:default )?)?function ${name}\\(`, 'mu');
   for (const { source } of await readUiFiles()) {
     const start = source.search(marker);
     if (start < 0) continue;
@@ -34,7 +44,7 @@ const readComponentSource = async (name) => {
 };
 
 test('React desktop shell preserves the production-first single-column layout', async () => {
-  const app = await read('src/ui/App.tsx');
+  const app = await readWorkbenchSource();
 
   for (const text of [
     '项目任务',
@@ -128,7 +138,7 @@ test('React desktop shell preserves the production-first single-column layout', 
 });
 
 test('pipeline summary follows title, screenplay, total progress, visual detail, then six stage cards', async () => {
-  const app = await read('src/ui/App.tsx');
+  const app = await readWorkbenchSource();
   const title = app.indexOf('当前阶段：{currentStageLabel}');
   const source = app.indexOf('当前剧本来源：“{screenplaySource}”');
   const progress = app.indexOf('aria-label="当前流水线真实总进度"');
@@ -297,7 +307,7 @@ test('Infinite Canvas opens both batch modes and automatically loads authenticat
 });
 
 test('Prompt Studio uses one in-window overlay stage with repeatable open and close', async () => {
-  const app = await read('src/ui/App.tsx');
+  const app = await readWorkbenchAndStudioSource();
   const openStart = app.indexOf('const setStudioOpen');
   const openSource = app.slice(openStart, app.indexOf('React.useEffect', openStart));
 
@@ -318,9 +328,9 @@ test('Prompt Studio uses one in-window overlay stage with repeatable open and cl
 });
 
 test('background polling does not repaint heavy Prompt Studio editors while scrolling', async () => {
-  const app = await read('src/ui/App.tsx');
+  const app = await readWorkbenchAndStudioSource();
 
-  assert.match(app, /const MemoPromptStudioDrawer = React\.memo\(PromptStudioDrawer\)/u);
+  assert.match(app, /(?:export )?const MemoPromptStudioDrawer = React\.memo\(PromptStudioDrawer\)/u);
   assert.match(app, /const MemoBatchStudio = React\.memo\(BatchStudio\)/u);
   assert.match(app, /const MemoRouteStudio = React\.memo\(/u);
   assert.match(app, /const MemoTemplateStudio = React\.memo\(TemplateStudio\)/u);

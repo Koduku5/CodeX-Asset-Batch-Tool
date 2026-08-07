@@ -18,7 +18,7 @@ KA Asset Batch 是面向剧本资产生产的 Windows 桌面软件。它把项�
 
 安装包包含：
 
-- .NET 8 自包含 WPF 桌面壳；
+- .NET 10 自包含 WPF 桌面壳；
 - React 生产页面；
 - 固定 Node.js 运行时；
 - 锁定版本的 Codex SDK sidecar 依赖；
@@ -183,7 +183,7 @@ flowchart TD
 
 ```text
 prompt-studio-prototype/
-├─ desktop/                     # .NET 8 WPF + WebView2 薄壳
+├─ desktop/                     # .NET 10 WPF + WebView2 薄壳
 │  └─ PromptStudio.Desktop/
 ├─ engine/                      # 正式流水线，运行时不依赖外部安装包
 │  ├─ assets/                   # Excel 模板、Prompt Catalog、基础路由与修饰器
@@ -201,7 +201,7 @@ prompt-studio-prototype/
 │     ├─ components/ui/         # shadcn 风格的 Radix UI 原语
 │     ├─ features/              # 可继续拆分的业务视图
 │     ├─ services/              # 前端 DTO 与调用适配器
-│     ├─ App.tsx                # 当前单窗口组合层
+│     ├─ App.tsx                # 稳定应用入口
 │     └─ styles/
 ├─ packaging/                   # 干净发行目录与 Inno Setup 安装包脚本
 │  ├─ sidecar/                  # 最小生产依赖清单
@@ -279,7 +279,7 @@ prompt-studio-prototype/
 ### 7.1 工具链
 
 - Node.js 与 npm
-- .NET 8 SDK
+- .NET 10 SDK
 - Windows x64
 - Inno Setup 6（只在制作安装包时需要）
 - Codex App（真实 Agent / ImageGen / Excel 流程验收）
@@ -358,7 +358,7 @@ npm run build:installer
 ### 8.2 增加本地 API
 
 1. 在 `src/server/` 实现纯服务模块并写单元测试。
-2. 在 `server.mjs` 注册固定路径、方法、body 上限和 DTO 校验。
+2. 在 `src/server/routes/` 的对应 route 模块注册固定路径、方法、body 上限和 DTO 校验，由 `server.mjs` 统一组合。
 3. 前端在 `src/ui/services/` 添加 adapter，组件不直接拼 URL。
 4. 若涉及目录或系统动作，进入 native RPC 白名单；不要接受网页传入任意绝对路径、程序名或命令行。
 5. 加入 `check:server` 与对应集成测试。
@@ -406,7 +406,7 @@ npm run build:installer
 - 没有在线自动更新服务器，使用新版安装包覆盖升级。
 - Codex 内置 ImageGen 仍以 Codex App 任务为执行权来源；Node SDK 不冒充图像生成能力。
 - 发行安装包未商业签名，跨机器分发可能触发 SmartScreen。
-- 源码中的 `App.tsx` 仍是单窗口组合层。后续新增大型功能应逐步向 `features/` 提取，但不能以“重构”为由改变已经验收的布局和动效。
+- `App.tsx` 只保留应用入口；工作台与 Prompt Studio 已按 feature 放在 `src/ui/features/`，现有布局和动效契约保持不变。
 
 补充文档：
 
