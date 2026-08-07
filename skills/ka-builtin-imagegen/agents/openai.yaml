@@ -1,0 +1,4 @@
+interface:
+  display_name: "KA 内置 ImageGen 执行器"
+  short_description: "从项目队列逐项领取任务并用 Codex 内置 ImageGen 出图"
+  default_prompt: "使用 $ka-builtin-imagegen 继续当前项目的内置出图队列。"

@@ -1,0 +1,17 @@
+{
+  "id": "reference.style",
+  "activeFieldSchema": "withInputImages",
+  "operations": [
+    { "op": "set", "field": "Use case", "value": "style-transfer" },
+    {
+      "op": "set",
+      "field": "Input images",
+      "value": { "call": "styleReferenceInputImages", "args": [{ "slot": "referenceCount" }] }
+    },
+    {
+      "op": "append",
+      "field": "Primary request",
+      "value": { "call": "styleReferenceRequestSuffix", "args": [{ "slot": "referenceCount" }] }
+    }
+  ]
+}

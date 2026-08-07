@@ -1,0 +1,21 @@
+{
+  "id": "reference.visual-consistency",
+  "activeFieldSchema": "withInputImages",
+  "operations": [
+    {
+      "op": "set",
+      "field": "Use case",
+      "value": "style-transfer/cross-asset-style-unification"
+    },
+    {
+      "op": "set",
+      "field": "Input images",
+      "value": { "call": "visualConsistencyInputImages", "args": [{ "slot": "referenceCount" }] }
+    },
+    {
+      "op": "set",
+      "field": "Primary request",
+      "value": { "call": "visualConsistencyPrimaryRequest", "args": [{ "slot": "referenceCount" }] }
+    }
+  ]
+}

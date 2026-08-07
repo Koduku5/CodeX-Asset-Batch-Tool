@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "legacy": {
+    "definitionVersion": 11,
+    "definitionPath": "../内置imagegen字段.json"
+  },
+  "legacyNames": {
+    "styles": {
+      "anime": "二次元",
+      "cg": "CG",
+      "live-action": "真人"
+    },
+    "assets": {
+      "character": "角色",
+      "creature": "生物",
+      "crowd": "群演",
+      "scene": "场景",
+      "prop": "道具"
+    },
+    "referenceModes": {
+      "none": "无参考图",
+      "style": "风格参考",
+      "visual-consistency": "统一视角风格",
+      "custom": "自定义"
+    }
+  },
+  "enums": {
+    "styles": ["anime", "cg", "live-action"],
+    "assets": ["character", "creature", "crowd", "scene", "prop"],
+    "referenceModes": ["none", "style", "visual-consistency", "custom"],
+    "modifierOperations": ["replaceWith", "prepend", "set", "append"]
+  },
+  "fieldSchemas": {
+    "withInputImages": [
+      "Use case",
+      "Input images",
+      "Asset type",
+      "Primary request",
+      "Scene/backdrop",
+      "Style/medium",
+      "Composition/framing",
+      "Lighting/mood",
+      "Color/tonality",
+      "Materials/textures",
+      "Constraints",
+      "Avoid"
+    ],
+    "withoutInputImages": [
+      "Use case",
+      "Asset type",
+      "Primary request",
+      "Scene/backdrop",
+      "Style/medium",
+      "Composition/framing",
+      "Lighting/mood",
+      "Color/tonality",
+      "Materials/textures",
+      "Constraints",
+      "Avoid"
+    ]
+  },
+  "compilation": {
+    "compilerVersion": 1,
+    "phases": [
+      "base-route",
+      "route-replacement",
+      "field-prepend",
+      "field-set",
+      "field-append",
+      "active-field-schema"
+    ],
+    "separator": "\n",
+    "fingerprintAlgorithm": "canonical-json-sha256-v1"
+  },
+  "paths": {
+    "commonFragment": "fragments/common.json",
+    "styleFragments": [
+      "fragments/styles/anime.json",
+      "fragments/styles/cg.json",
+      "fragments/styles/live-action.json"
+    ],
+    "assetFragments": [
+      "fragments/asset-types/character.json",
+      "fragments/asset-types/creature.json",
+      "fragments/asset-types/crowd.json",
+      "fragments/asset-types/scene.json",
+      "fragments/asset-types/prop.json"
+    ],
+    "referenceFragments": [
+      "fragments/reference-modes/none.json",
+      "fragments/reference-modes/style.json",
+      "fragments/reference-modes/visual-consistency.json",
+      "fragments/reference-modes/custom.json"
+    ],
+    "builtinRoutes": "routes/builtin.json",
+    "referenceModifiers": "modifiers/reference-mode.json",
+    "conditionModules": "modifiers/condition-modules-v1.json",
+    "apiDefaults": "fragments/api/default-templates.json"
+  }
+}

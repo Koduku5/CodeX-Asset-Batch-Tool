@@ -1,0 +1,1106 @@
+import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { lstat, readFile, realpath } from 'node:fs/promises';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import {
+  createPromptBranchClassificationSession,
+  PromptBranchClassificationError
+} from './prompt-branch-classification.mjs';
+import {
+  codexThreadRuntimeOptions,
+  normalizeCodexRuntimeSelection,
+  readCodexModelLabel
+} from './codex-runtime-config.mjs';
+import { createCodexSdkOptions } from './codex-sdk-options.mjs';
+import { analysisPrompt } from './codex-agent/analyze-screenplay.mjs';
+import { worldOverviewPrompt } from './codex-agent/build-world-overview.mjs';
+import {
+  classificationPagePrompt,
+  classificationPrompt
+} from './codex-agent/classify-prompt-branches.mjs';
+import { visualSpecPrompt } from './codex-agent/complete-asset-visual-specs.mjs';
+import {
+  analysisSdkSchema,
+  resultSchema,
+  visualSpecResultSchema
+} from './codex-agent/contracts.mjs';
+
+export { readCodexModelLabel } from './codex-runtime-config.mjs';
+
+export const CODEX_AGENT_ACTIONS = Object.freeze([
+  'analyze-screenplay',
+  'build-world-overview',
+  'complete-asset-visual-specs',
+  'classify-prompt-branches'
+]);
+
+const ACTIONS = new Set(CODEX_AGENT_ACTIONS);
+const MAX_PROGRESS_EVENTS = 512;
+const MAX_PIPELINE_SKILL_BYTES = 1024 * 1024;
+const MAX_EPISODE_ASSET_SKILL_BYTES = 256 * 1024;
+const MAX_ANALYSIS_PROGRESS_BYTES = 4 * 1024 * 1024;
+const MAX_ANALYSIS_RESULT_BYTES = 1024 * 1024;
+const MAX_PIPELINE_COMMAND_OUTPUT_BYTES = 64 * 1024;
+const DEFAULT_NETWORK_RETRY_LIMIT = 3;
+export const SOFTWARE_PIPELINE_SKILL_PATH = fileURLToPath(
+  new URL('../../skills/ka-script-pipeline/SKILL.md', import.meta.url)
+);
+export const SOFTWARE_EPISODE_ASSET_SKILL_PATH = fileURLToPath(
+  new URL('../../skills/ka-episode-asset-analysis/SKILL.md', import.meta.url)
+);
+const DEFAULT_TIMEOUTS = Object.freeze({
+  'analyze-screenplay': Object.freeze({ total: 2 * 60 * 60 * 1000, idle: 8 * 60 * 1000 }),
+  'build-world-overview': Object.freeze({ total: 60 * 60 * 1000, idle: 8 * 60 * 1000 }),
+  'complete-asset-visual-specs': Object.freeze({ total: 2 * 60 * 60 * 1000, idle: 8 * 60 * 1000 }),
+  'classify-prompt-branches': Object.freeze({ total: 2 * 60 * 60 * 1000, idle: 8 * 60 * 1000 })
+});
+
+const promptForAction = (action, pipelineSkill) => {
+  if (action === 'build-world-overview') return worldOverviewPrompt(pipelineSkill.path);
+  if (action === 'classify-prompt-branches') return classificationPrompt(pipelineSkill.path);
+  throw workerError('SKILL_UNAVAILABLE', '软件级执行规范没有绑定到固定动作');
+};
+
+const promptForAnalysisEpisode = (episode, pipelineSkill) => analysisPrompt({
+  episode,
+  episodeFile: `cache/单集原文/第${String(episode).padStart(3, '0')}集.json`,
+  episodeSkillPath: pipelineSkill.episodeAssetSkillPath
+});
+
+export class CodexAgentWorkerError extends Error {
+  constructor(code, message, cause = null) {
+    super(message);
+    this.name = 'CodexAgentWorkerError';
+    this.code = code;
+    this.cause = cause;
+  }
+}
+
+const workerError = (code, message, cause = null) => new CodexAgentWorkerError(code, message, cause);
+
+const exactInput = (input) => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw workerError('INVALID_WORKER_INPUT', 'Agent 任务输入无效');
+  }
+  const unknown = Object.keys(input).filter((key) => !['action', 'projectRoot', 'runtimeConfig'].includes(key));
+  if (unknown.length) throw workerError('INVALID_WORKER_INPUT', 'Agent 任务包含不允许的字段');
+  if (!ACTIONS.has(input.action)) throw workerError('ACTION_NOT_ALLOWED', '不允许执行该 Agent 动作');
+  if (typeof input.projectRoot !== 'string' || !isAbsolute(input.projectRoot)) {
+    throw workerError('INVALID_PROJECT_ROOT', 'Agent 项目根无效');
+  }
+  let runtimeConfig = null;
+  if (input.runtimeConfig !== undefined) {
+    try {
+      runtimeConfig = normalizeCodexRuntimeSelection(input.runtimeConfig, { nullable: true });
+    } catch (error) {
+      throw workerError('INVALID_WORKER_INPUT', 'Agent 模型配置无效', error);
+    }
+  }
+  return { action: input.action, projectRoot: resolve(input.projectRoot), runtimeConfig };
+};
+
+const isOutside = (root, candidate) => {
+  const value = relative(root, candidate);
+  return value === '..' || value.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(value);
+};
+
+const canonicalProject = async (candidate) => {
+  let info;
+  let canonical;
+  try {
+    info = await lstat(candidate);
+    canonical = await realpath(candidate);
+  } catch (error) {
+    throw workerError('PROJECT_ROOT_UNAVAILABLE', 'Agent 项目根不可用', error);
+  }
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw workerError('PROJECT_ROOT_UNSAFE', 'Agent 项目根不是安全的普通目录');
+  }
+  return canonical;
+};
+
+const readAnalysisProgressFile = async (projectRoot) => {
+  const target = join(projectRoot, 'cache', '阅读进度.json');
+  try {
+    const info = await lstat(target);
+    if (!info.isFile() || info.isSymbolicLink() || info.size <= 0 || info.size > MAX_ANALYSIS_PROGRESS_BYTES) {
+      throw new Error('unsafe analysis progress file');
+    }
+    const canonical = await realpath(target);
+    if (isOutside(projectRoot, canonical)) throw new Error('analysis progress escapes project root');
+    const content = await readFile(canonical, 'utf8');
+    if (Buffer.byteLength(content, 'utf8') !== info.size) throw new Error('analysis progress changed while reading');
+    return JSON.parse(content);
+  } catch (error) {
+    throw workerError('ANALYSIS_PROGRESS_UNAVAILABLE', '逐集分析进度不可用', error);
+  }
+};
+
+const normalizeEpisodeList = (value, label) => {
+  if (!Array.isArray(value) || value.some((episode) => !Number.isInteger(episode) || episode <= 0)) {
+    throw workerError('ANALYSIS_PROGRESS_INVALID', `逐集分析进度的 ${label} 无效`);
+  }
+  if (new Set(value).size !== value.length) {
+    throw workerError('ANALYSIS_PROGRESS_INVALID', `逐集分析进度的 ${label} 存在重复集数`);
+  }
+  return Object.freeze([...value]);
+};
+
+const normalizeAnalysisProgress = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw workerError('ANALYSIS_PROGRESS_INVALID', '逐集分析进度格式无效');
+  }
+  const discoveredEpisodes = normalizeEpisodeList(value.discoveredEpisodes, 'discoveredEpisodes');
+  const completedEpisodes = normalizeEpisodeList(value.completedEpisodes, 'completedEpisodes');
+  const discovered = new Set(discoveredEpisodes);
+  if (completedEpisodes.some((episode) => !discovered.has(episode))) {
+    throw workerError('ANALYSIS_PROGRESS_INVALID', '已完成集不属于当前切分结果');
+  }
+  const currentEpisode = value.currentEpisode == null ? null : value.currentEpisode;
+  if (currentEpisode !== null && (!Number.isInteger(currentEpisode) || !discovered.has(currentEpisode))) {
+    throw workerError('ANALYSIS_PROGRESS_INVALID', '当前分析集无效');
+  }
+  if (currentEpisode !== null && (typeof value.currentSessionToken !== 'string' || !value.currentSessionToken.trim())) {
+    throw workerError('ANALYSIS_PROGRESS_INVALID', '当前逐集分析会话缺少持久令牌');
+  }
+  return Object.freeze({ discoveredEpisodes, completedEpisodes, currentEpisode });
+};
+
+const nextAnalysisEpisode = (progress) => {
+  const completed = new Set(progress.completedEpisodes);
+  const next = progress.discoveredEpisodes.find((episode) => !completed.has(episode)) ?? null;
+  if (progress.currentEpisode !== null && progress.currentEpisode !== next) {
+    throw workerError('ANALYSIS_PROGRESS_INVALID', '当前分析集不是首个未完成集');
+  }
+  return next;
+};
+
+const verifyEpisodeCommit = (before, after, episode) => {
+  if (before.discoveredEpisodes.length !== after.discoveredEpisodes.length
+    || before.discoveredEpisodes.some((value, index) => value !== after.discoveredEpisodes[index])) {
+    throw workerError('ANALYSIS_SOURCE_CHANGED', '剧本切分结果在单集分析期间发生变化');
+  }
+  const beforeCompleted = new Set(before.completedEpisodes);
+  if (before.completedEpisodes.some((value) => !after.completedEpisodes.includes(value))) {
+    throw workerError('ANALYSIS_PROGRESS_INVALID', '单集分析完成后已有进度发生回退');
+  }
+  const newlyCompleted = after.completedEpisodes.filter((value) => !beforeCompleted.has(value));
+  if (newlyCompleted.length !== 1 || newlyCompleted[0] !== episode || after.currentEpisode !== null) {
+    throw workerError('ANALYSIS_EPISODE_NOT_COMMITTED', `第 ${episode} 集未完成原子累计与完成标记`);
+  }
+};
+
+const inspectSoftwarePipelineSkill = async (pipelineSkillPathInput) => {
+  if (typeof pipelineSkillPathInput !== 'string' || !isAbsolute(pipelineSkillPathInput)) {
+    throw workerError('SKILL_UNAVAILABLE', '软件级 ka-script-pipeline 执行规范路径无效');
+  }
+  const configuredPath = resolve(pipelineSkillPathInput);
+  const configuredRoot = resolve(configuredPath, '..');
+  const configuredSkillsRoot = resolve(configuredRoot, '..');
+  const configuredEpisodeAssetRoot = join(configuredSkillsRoot, 'ka-episode-asset-analysis');
+  const configuredEpisodeAssetSkillPath = join(configuredEpisodeAssetRoot, 'SKILL.md');
+  if (basename(configuredPath).toLowerCase() !== 'skill.md'
+    || basename(configuredRoot).toLowerCase() !== 'ka-script-pipeline') {
+    throw workerError('SKILL_UNAVAILABLE', '软件级 ka-script-pipeline 执行规范路径无效');
+  }
+  try {
+    const [rootInfo, skillInfo, episodeAssetRootInfo, episodeAssetSkillInfo] = await Promise.all([
+      lstat(configuredRoot),
+      lstat(configuredPath),
+      lstat(configuredEpisodeAssetRoot),
+      lstat(configuredEpisodeAssetSkillPath)
+    ]);
+    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('unsafe skill directory');
+    if (!skillInfo.isFile() || skillInfo.isSymbolicLink()) throw new Error('unsafe skill file');
+    if (!episodeAssetRootInfo.isDirectory() || episodeAssetRootInfo.isSymbolicLink()) {
+      throw new Error('unsafe episode asset skill directory');
+    }
+    if (!episodeAssetSkillInfo.isFile() || episodeAssetSkillInfo.isSymbolicLink()) {
+      throw new Error('unsafe episode asset skill file');
+    }
+    if (skillInfo.size <= 0 || skillInfo.size > MAX_PIPELINE_SKILL_BYTES) throw new Error('invalid skill size');
+    if (episodeAssetSkillInfo.size <= 0 || episodeAssetSkillInfo.size > MAX_EPISODE_ASSET_SKILL_BYTES) {
+      throw new Error('invalid episode asset skill size');
+    }
+    const [canonicalSkillsRoot, canonicalRoot, canonicalPath, canonicalEpisodeAssetRoot, canonicalEpisodeAssetSkillPath] = await Promise.all([
+      realpath(configuredSkillsRoot),
+      realpath(configuredRoot),
+      realpath(configuredPath),
+      realpath(configuredEpisodeAssetRoot),
+      realpath(configuredEpisodeAssetSkillPath)
+    ]);
+    if (isOutside(canonicalSkillsRoot, canonicalRoot) || isOutside(canonicalSkillsRoot, canonicalEpisodeAssetRoot)) {
+      throw new Error('software skill escapes skills directory');
+    }
+    if (isOutside(canonicalRoot, canonicalPath)) throw new Error('skill file escapes software skill directory');
+    if (isOutside(canonicalEpisodeAssetRoot, canonicalEpisodeAssetSkillPath)) {
+      throw new Error('episode asset skill file escapes software skill directory');
+    }
+    const [content, episodeAssetSkillContent] = await Promise.all([
+      readFile(canonicalPath),
+      readFile(canonicalEpisodeAssetSkillPath)
+    ]);
+    if (content.length !== skillInfo.size || episodeAssetSkillContent.length !== episodeAssetSkillInfo.size) {
+      throw new Error('skill changed while being inspected');
+    }
+    const sha256 = createHash('sha256')
+      .update('ka-script-pipeline/SKILL.md\0').update(content)
+      .update('\0ka-episode-asset-analysis/SKILL.md\0').update(episodeAssetSkillContent)
+      .digest('hex');
+    return Object.freeze({
+      id: 'ka-script-pipeline',
+      configuredPath,
+      root: canonicalRoot,
+      path: canonicalPath,
+      episodeAssetSkillRoot: canonicalEpisodeAssetRoot,
+      episodeAssetSkillPath: canonicalEpisodeAssetSkillPath,
+      fileIdentity: `${skillInfo.dev}:${skillInfo.ino}|${episodeAssetSkillInfo.dev}:${episodeAssetSkillInfo.ino}`,
+      sha256,
+    });
+  } catch (error) {
+    throw workerError('SKILL_UNAVAILABLE', '软件级 ka-script-pipeline 执行规范不可用', error);
+  }
+};
+
+const verifySoftwarePipelineSkill = async (snapshot) => {
+  const current = await inspectSoftwarePipelineSkill(snapshot.configuredPath);
+  if (current.fileIdentity !== snapshot.fileIdentity || current.sha256 !== snapshot.sha256) {
+    throw workerError('SKILL_CHANGED', '软件级 ka-script-pipeline 执行规范在任务期间发生变化');
+  }
+};
+
+const publicSkillReceipt = (snapshot) => Object.freeze({
+  id: snapshot.id,
+  sha256: snapshot.sha256
+});
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+
+export const sanitizeAgentText = (value, projectRoot = '') => {
+  let text = String(value ?? '')
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, '')
+    .replace(/\r\n?/gu, '\n')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, ' ');
+  if (projectRoot) text = text.replace(new RegExp(escapeRegExp(projectRoot), 'giu'), '[project]');
+  return text
+    .replace(/\b(authorization\s*:\s*bearer)\s+[^\s]+/giu, '$1 [redacted]')
+    .replace(/\b((?:openai[-_ ]?|codex[-_ ]?)?api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|credential|secret)\s*[:=]\s*[^\s,;]+/giu, '$1=[redacted]')
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gu, '[redacted]')
+    .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\s"'<>|]*/gu, '[path]')
+    .replace(/(?:^|\s)\/(?:[^\s"'<>/]+\/)*[^\s"'<>/]*/gmu, (match) => `${match.startsWith(' ') ? ' ' : ''}[path]`)
+    .replace(/\b(?:input|output|cached|reasoning)?_?tokens?\s*[:=]\s*\d+\b/giu, '[usage omitted]')
+    .trim()
+    .slice(0, 500);
+};
+
+const boundedTimeout = (value, fallback, label) => {
+  const timeout = value ?? fallback;
+  if (!Number.isInteger(timeout) || timeout < 10 || timeout > 24 * 60 * 60 * 1000) {
+    throw new TypeError(`${label} must be an integer from 10 through 86400000`);
+  }
+  return timeout;
+};
+
+const boundedRetryLimit = (value) => {
+  const limit = value ?? DEFAULT_NETWORK_RETRY_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+    throw new TypeError('networkRetryLimit must be an integer from 1 through 10');
+  }
+  return limit;
+};
+
+const loadDefaultCodex = async () => {
+  let module;
+  try {
+    module = await import('@openai/codex-sdk');
+  } catch (error) {
+    throw workerError('CODEX_SDK_UNAVAILABLE', 'Codex SDK 未安装或无法载入', error);
+  }
+  if (typeof module.Codex !== 'function') {
+    throw workerError('CODEX_SDK_UNAVAILABLE', 'Codex SDK 运行时不完整');
+  }
+  try {
+    return new module.Codex(createCodexSdkOptions());
+  } catch (error) {
+    throw workerError('CODEX_RUNTIME_UNAVAILABLE', 'Codex 本地运行时不可用', error);
+  }
+};
+
+const classifyRuntimeError = (error) => {
+  if (error instanceof CodexAgentWorkerError) return error;
+  if (error instanceof PromptBranchClassificationError) return workerError(error.code, error.message, error);
+  const message = String(error?.message || 'Codex Agent 运行失败');
+  if (/auth|log[ -]?in|sign[ -]?in|unauthori[sz]ed|forbidden|\b401\b|\b403\b/iu.test(message)) {
+    return workerError('CODEX_AUTH_UNAVAILABLE', 'Codex 尚未登录或认证不可用', error);
+  }
+  if (/spawn|executable|binary|runtime|ENOENT/iu.test(message)) {
+    return workerError('CODEX_RUNTIME_UNAVAILABLE', 'Codex 本地运行时不可用', error);
+  }
+  return workerError('CODEX_AGENT_FAILED', 'Codex Agent 执行失败', error);
+};
+
+const resultSchemaError = (path, message) => {
+  throw workerError('INVALID_AGENT_RESULT', `Codex Agent 完成回执 ${path} ${message}`);
+};
+
+const validateSchemaValue = (value, schema, path = '$') => {
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  const matchesType = types.some((type) => {
+    if (type === 'null') return value === null;
+    if (type === 'array') return Array.isArray(value);
+    if (type === 'object') return value !== null && typeof value === 'object' && !Array.isArray(value);
+    if (type === 'integer') return Number.isInteger(value);
+    return typeof value === type;
+  });
+  if (!matchesType) resultSchemaError(path, `必须是 ${types.join(' 或 ')}`);
+  if (schema.enum && !schema.enum.includes(value)) resultSchemaError(path, '不在允许值中');
+  if (typeof value === 'string') {
+    if (schema.minLength !== undefined && value.length < schema.minLength) resultSchemaError(path, '不能为空');
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) resultSchemaError(path, '长度超出限制');
+  }
+  if (Number.isInteger(value)) {
+    if (schema.minimum !== undefined && value < schema.minimum) resultSchemaError(path, '小于允许的最小值');
+    if (schema.maximum !== undefined && value > schema.maximum) resultSchemaError(path, '大于允许的最大值');
+  }
+  if (Array.isArray(value)) {
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) resultSchemaError(path, '条目数超出限制');
+    if (schema.uniqueItems && new Set(value.map((item) => JSON.stringify(item))).size !== value.length) {
+      resultSchemaError(path, '包含重复条目');
+    }
+    value.forEach((item, index) => validateSchemaValue(item, schema.items, `${path}[${index}]`));
+  }
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const keys = Object.keys(value);
+    for (const required of schema.required ?? []) {
+      if (!Object.hasOwn(value, required)) resultSchemaError(`${path}.${required}`, '缺失');
+    }
+    if (schema.additionalProperties === false) {
+      const unknown = keys.find((key) => !Object.hasOwn(schema.properties, key));
+      if (unknown) resultSchemaError(`${path}.${unknown}`, '是未定义字段');
+    }
+    for (const key of keys) {
+      if (Object.hasOwn(schema.properties ?? {}, key)) {
+        validateSchemaValue(value[key], schema.properties[key], `${path}.${key}`);
+      }
+    }
+  }
+};
+
+const normalizeAliasKey = (value) => value.replace(/\s+/gu, '').toLowerCase();
+
+const normalizeAnalysisAliases = (analysis) => {
+  for (const type of ['characters', 'creatures', 'extras', 'scenes', 'props']) {
+    analysis.assets[type].forEach((record) => {
+      const seen = new Set();
+      const assetNameKey = normalizeAliasKey(record.assetName);
+      record.aliases = record.aliases.reduce((aliases, alias) => {
+        const text = alias.trim();
+        const key = normalizeAliasKey(text);
+        if (!key || key === assetNameKey || seen.has(key)) return aliases;
+        seen.add(key);
+        aliases.push(text);
+        return aliases;
+      }, []);
+    });
+  }
+  return analysis;
+};
+
+const prepareAnalysisForFormalWriter = (analysis) => ({
+  ...analysis,
+  assets: Object.fromEntries(
+    ['characters', 'creatures', 'extras', 'scenes', 'props'].map((type) => [
+      type,
+      analysis.assets[type].map((record) => {
+        if (record.assetId !== null) return record;
+        const { assetId: _newAssetMarker, ...formalRecord } = record;
+        return formalRecord;
+      })
+    ])
+  )
+});
+
+const parseFinalResult = (text, action, projectRoot, episode = null) => {
+  const candidate = String(text ?? '').trim().replace(/^```(?:json)?\s*|\s*```$/giu, '');
+  let value;
+  try {
+    value = JSON.parse(candidate);
+  } catch (error) {
+    throw workerError('INVALID_AGENT_RESULT', 'Codex Agent 未返回有效完成回执', error);
+  }
+  validateSchemaValue(value, resultSchema(action, episode));
+  let analysis = null;
+  if (action === 'analyze-screenplay') {
+    const normalizedAnalysis = normalizeAnalysisAliases(value.analysis);
+    if (Buffer.byteLength(JSON.stringify(normalizedAnalysis), 'utf8') > MAX_ANALYSIS_RESULT_BYTES) {
+      throw workerError('INVALID_AGENT_RESULT', 'Codex Agent 单集分析大小超出限制');
+    }
+    analysis = prepareAnalysisForFormalWriter(normalizedAnalysis);
+  }
+  const result = Object.freeze({
+    completed: value.completed,
+    action,
+    summary: sanitizeAgentText(value.summary, projectRoot).slice(0, 240) || '动作未提供可显示说明',
+    processedCount: value.processedCount,
+    ...(analysis ? { analysis } : {})
+  });
+  if (!result.completed) throw workerError('AGENT_REPORTED_INCOMPLETE', result.summary);
+  return result;
+};
+
+const runControlledProcess = ({ executable, argumentsList, cwd, input = null, signal, onActivity }) => new Promise((resolve, reject) => {
+  let stdout = Buffer.alloc(0);
+  let stderr = Buffer.alloc(0);
+  let settled = false;
+  const child = spawn(executable, argumentsList, {
+    cwd,
+    windowsHide: true,
+    signal,
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  const append = (current, chunk) => {
+    const combined = Buffer.concat([current, Buffer.from(chunk)]);
+    return combined.length > MAX_PIPELINE_COMMAND_OUTPUT_BYTES
+      ? combined.subarray(combined.length - MAX_PIPELINE_COMMAND_OUTPUT_BYTES)
+      : combined;
+  };
+  child.stdout.on('data', (chunk) => {
+    stdout = append(stdout, chunk);
+    onActivity?.();
+  });
+  child.stderr.on('data', (chunk) => {
+    stderr = append(stderr, chunk);
+    onActivity?.();
+  });
+  child.once('error', (error) => {
+    if (settled) return;
+    settled = true;
+    reject(error);
+  });
+  child.once('close', (code, closeSignal) => {
+    if (settled) return;
+    settled = true;
+    if (code === 0 && !closeSignal) {
+      resolve(stdout.toString('utf8'));
+      return;
+    }
+    reject(new Error(`pipeline command exited with ${closeSignal ? `signal ${closeSignal}` : `code ${code ?? 1}`}: ${stderr.toString('utf8')}`));
+  });
+  child.stdin.on('error', () => {});
+  if (input === null) child.stdin.end();
+  else child.stdin.end(input, 'utf8');
+});
+
+const runProjectPipelineScript = async ({
+  projectRoot, runtime, script, argumentsList, input, signal, onActivity, label,
+  errorCode = 'ANALYSIS_PIPELINE_FAILED'
+}) => {
+  const runner = join(projectRoot, 'scripts', 'commands', `${runtime}.ps1`);
+  const scriptPath = join(projectRoot, 'scripts', 'pipeline', script);
+  try {
+    return await runControlledProcess({
+      executable: 'powershell.exe',
+      argumentsList: [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+        runner, scriptPath, projectRoot, ...argumentsList
+      ],
+      cwd: projectRoot,
+      input,
+      signal,
+      onActivity
+    });
+  } catch (error) {
+    if (signal?.aborted) throw signal.reason ?? error;
+    const detail = sanitizeAgentText(error?.message, projectRoot)
+      .replace(/^pipeline command exited with (?:signal \S+|code \d+):\s*/iu, '')
+      .replace(/\s+/gu, ' ')
+      .slice(0, 240);
+    throw workerError(errorCode, `${label}失败${detail ? `：${detail}` : ''}`, error);
+  }
+};
+
+const prepareAnalysisEpisodeDefault = async ({ projectRoot, episode, resume, signal, onActivity, onProgress }) => {
+  await runProjectPipelineScript({
+    projectRoot,
+    runtime: 'node',
+    script: 'update_analysis_progress.mjs',
+    argumentsList: ['start', String(episode), ...(resume ? ['--resume'] : [])],
+    signal,
+    onActivity,
+    label: `第 ${episode} 集开始标记`
+  });
+  onProgress?.('当前集分析进度已更新');
+};
+
+const commitAnalysisEpisodeDefault = async ({ projectRoot, episode, analysis, signal, onActivity, onProgress }) => {
+  await runProjectPipelineScript({
+    projectRoot,
+    runtime: 'python',
+    script: 'write_episode_analysis.py',
+    argumentsList: [String(episode)],
+    input: JSON.stringify(analysis),
+    signal,
+    onActivity,
+    label: `第 ${episode} 集分析文件写入`
+  });
+  onProgress?.('当前集分析文件已安全保存');
+  await runProjectPipelineScript({
+    projectRoot,
+    runtime: 'python',
+    script: 'sync_episode_analysis.py',
+    argumentsList: [String(episode)],
+    signal,
+    onActivity,
+    label: `第 ${episode} 集累计同步`
+  });
+  onProgress?.('当前集分析结果已累计保存');
+  await runProjectPipelineScript({
+    projectRoot,
+    runtime: 'node',
+    script: 'update_analysis_progress.mjs',
+    argumentsList: ['complete', String(episode)],
+    signal,
+    onActivity,
+    label: `第 ${episode} 集完成标记`
+  });
+  onProgress?.('当前集分析进度已更新');
+};
+
+const runVisualSpecScriptDefault = async ({ projectRoot, command, payload = null, signal, onActivity }) => {
+  const text = await runProjectPipelineScript({
+    projectRoot,
+    runtime: 'python',
+    script: 'asset_visual_specs.py',
+    argumentsList: [command],
+    input: payload === null ? null : JSON.stringify(payload),
+    signal,
+    onActivity,
+    label: `资产视觉规格${command === 'commit' ? '回填' : command === 'next' ? '读取' : '初始化'}`,
+    errorCode: 'VISUAL_SPECS_PIPELINE_FAILED'
+  });
+  const result = parseAgentJson(text, '资产视觉规格本地脚本');
+  if (result?.ok !== true) throw workerError('VISUAL_SPECS_PIPELINE_FAILED', '资产视觉规格本地脚本未返回成功状态');
+  return result;
+};
+
+const safeEventMessage = (event) => {
+  if (event?.type === 'thread.started') return 'Codex Agent 新会话已建立';
+  if (event?.type === 'turn.started') return 'Codex Agent 已开始执行固定动作';
+  if (event?.type === 'turn.completed') return 'Codex Agent 已完成本轮执行';
+  if (event?.type !== 'item.completed') return null;
+  const item = event.item;
+  if (item?.type === 'command_execution') {
+    if (item.status === 'failed') return '正式流水线命令执行失败';
+    const command = String(item.command || '');
+    if (/update_analysis_progress\.mjs/iu.test(command)) return '当前集分析进度已更新';
+    if (/query_asset_records\.py/iu.test(command)) return '当前集候选资产记录已读取';
+    if (/sync_episode_analysis\.py/iu.test(command)) return '当前集分析结果已累计保存';
+    if (/page_world_records\.py/iu.test(command)) return '世界观事实分页已读取';
+    if (/finalize_world_overview\.py/iu.test(command)) return '世界观总览已完成正式校验';
+    return null;
+  }
+  if (item?.type === 'file_change') {
+    const count = Array.isArray(item.changes) ? item.changes.length : 0;
+    return `项目状态文件已更新（${Math.min(count, 999)} 项）`;
+  }
+  if (item?.type === 'mcp_tool_call') {
+    return item.status === 'failed' ? '必需工具调用失败' : '必需工具调用已完成';
+  }
+  if (item?.type === 'error') return 'Codex Agent 报告执行错误';
+  return null;
+};
+
+const parseAgentJson = (text, label) => {
+  const candidate = String(text ?? '').trim().replace(/^```(?:json)?\s*|\s*```$/giu, '');
+  try {
+    return JSON.parse(candidate);
+  } catch (error) {
+    throw workerError('INVALID_AGENT_RESULT', `${label}未返回有效结构化回执`, error);
+  }
+};
+
+export async function runCodexAgentAction(input, {
+  createCodex = loadDefaultCodex,
+  createBranchClassificationSession = createPromptBranchClassificationSession,
+  readAnalysisProgress = readAnalysisProgressFile,
+  prepareAnalysisEpisode = prepareAnalysisEpisodeDefault,
+  commitAnalysisEpisode = commitAnalysisEpisodeDefault,
+  runVisualSpecScript = runVisualSpecScriptDefault,
+  resolveModelLabel = readCodexModelLabel,
+  emit = (line) => process.stdout.write(`${line}\n`),
+  pipelineSkillPath = SOFTWARE_PIPELINE_SKILL_PATH,
+  signal = null,
+  totalTimeoutMs,
+  idleTimeoutMs,
+  networkRetryLimit
+} = {}) {
+  if (typeof createCodex !== 'function' || typeof createBranchClassificationSession !== 'function'
+    || typeof readAnalysisProgress !== 'function' || typeof resolveModelLabel !== 'function'
+    || typeof prepareAnalysisEpisode !== 'function' || typeof commitAnalysisEpisode !== 'function'
+    || typeof runVisualSpecScript !== 'function'
+    || typeof emit !== 'function') {
+    throw new TypeError('worker dependencies must be functions');
+  }
+  const request = exactInput(input);
+  const projectRoot = await canonicalProject(request.projectRoot);
+  const pipelineSkill = await inspectSoftwarePipelineSkill(pipelineSkillPath);
+  if (!isOutside(projectRoot, pipelineSkill.path)
+    || !isOutside(pipelineSkill.root, projectRoot)
+    || !isOutside(projectRoot, pipelineSkill.episodeAssetSkillPath)
+    || !isOutside(pipelineSkill.episodeAssetSkillRoot, projectRoot)) {
+    throw workerError('PROJECT_ROOT_UNSAFE', '项目根不能与软件级 Skill 目录重叠');
+  }
+  const defaults = DEFAULT_TIMEOUTS[request.action];
+  const totalTimeout = boundedTimeout(totalTimeoutMs, defaults.total, 'totalTimeoutMs');
+  const idleTimeout = boundedTimeout(idleTimeoutMs, defaults.idle, 'idleTimeoutMs');
+  const retryLimit = boundedRetryLimit(networkRetryLimit);
+  const controller = new AbortController();
+  let abortError = null;
+  let idleTimer = null;
+  let totalTimer = null;
+  let externalAbort = null;
+  let rejectTimeout;
+  const timeoutPromise = new Promise((_, reject) => { rejectTimeout = reject; });
+  const abort = (code, message) => {
+    if (abortError) return;
+    abortError = workerError(code, message);
+    controller.abort(abortError);
+    rejectTimeout(abortError);
+  };
+  const resetIdleTimer = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => abort('CODEX_IDLE_TIMEOUT', 'Codex Agent 长时间没有响应，任务已停止'), idleTimeout);
+  };
+  totalTimer = setTimeout(() => abort('CODEX_TOTAL_TIMEOUT', 'Codex Agent 超过总时限，任务已停止'), totalTimeout);
+  resetIdleTimer();
+  if (signal) {
+    externalAbort = () => abort('CODEX_INTERRUPTED', 'Codex Agent 任务已中断');
+    if (signal.aborted) externalAbort();
+    else signal.addEventListener('abort', externalAbort, { once: true });
+  }
+
+  let progressEvents = 0;
+  let progressTruncated = false;
+  let lastProgressMessage = '';
+  const emitProgress = (message) => {
+    if (!message || message === lastProgressMessage) return;
+    lastProgressMessage = message;
+    if (progressEvents < MAX_PROGRESS_EVENTS) {
+      emit(message);
+      progressEvents += 1;
+    } else if (!progressTruncated) {
+      emit('中间进度较多，后续仅保留最终回执');
+      progressTruncated = true;
+    }
+  };
+
+  const createSdk = async () => {
+    try {
+      const codex = await createCodex();
+      if (!codex || typeof codex.startThread !== 'function') {
+        throw workerError('CODEX_SDK_UNAVAILABLE', 'Codex SDK 运行时不完整');
+      }
+      return codex;
+    } catch (error) {
+      throw classifyRuntimeError(error);
+    }
+  };
+
+  const loadAnalysisProgress = async () => {
+    try {
+      return normalizeAnalysisProgress(await readAnalysisProgress(projectRoot));
+    } catch (error) {
+      if (error instanceof CodexAgentWorkerError) throw error;
+      throw workerError('ANALYSIS_PROGRESS_UNAVAILABLE', '逐集分析进度不可用', error);
+    }
+  };
+
+  const runThread = async ({
+    codex, prompt, outputSchema, sandboxMode, strictClassification = false, strictAnalysis = false,
+    strictVisualSpec = false
+  }) => {
+    if (abortError) throw abortError;
+    let thread;
+    try {
+      thread = codex.startThread({
+        workingDirectory: projectRoot,
+        skipGitRepoCheck: true,
+        sandboxMode,
+        networkAccessEnabled: false,
+        webSearchMode: 'disabled',
+        approvalPolicy: 'never',
+        ...codexThreadRuntimeOptions(request.runtimeConfig ?? { model: null, reasoningEffort: null })
+      });
+    } catch (error) {
+      throw classifyRuntimeError(error);
+    }
+    if (!thread || typeof thread.runStreamed !== 'function') {
+      throw workerError('CODEX_SDK_UNAVAILABLE', 'Codex SDK thread 不可用');
+    }
+    let streamed;
+    try {
+      streamed = await thread.runStreamed(prompt, {
+        outputSchema: strictAnalysis || strictVisualSpec ? analysisSdkSchema(outputSchema) : outputSchema,
+        signal: controller.signal
+      });
+    } catch (error) {
+      throw classifyRuntimeError(error);
+    }
+    if (abortError) throw abortError;
+    if (!streamed?.events || typeof streamed.events[Symbol.asyncIterator] !== 'function') {
+      throw workerError('CODEX_SDK_UNAVAILABLE', 'Codex SDK 未返回事件流');
+    }
+    let finalMessage = '';
+    let turnCompleted = false;
+    let lastStreamError = '';
+    let lastItemError = '';
+    let lastAnalysisCommandError = '';
+    let networkRetryCount = 0;
+    try {
+      for await (const event of streamed.events) {
+        if (abortError) throw abortError;
+        if (event?.type === 'error') {
+          lastStreamError = String(event.message || 'Codex stream failed');
+          networkRetryCount += 1;
+          if (networkRetryCount >= retryLimit) {
+            abort(
+              'CODEX_NETWORK_RETRY_EXHAUSTED',
+              `Codex 网络重试已达到 ${retryLimit} 次上限，任务已停止，可从当前进度继续`
+            );
+            throw abortError;
+          }
+          emitProgress(`Codex Agent 连接短暂中断，正在自动重试（${networkRetryCount}/${retryLimit}）`);
+          continue;
+        }
+        resetIdleTimer();
+        if (event?.type === 'reasoning' || event?.item?.type === 'reasoning') continue;
+        if (event?.type === 'item.completed' && event.item?.type === 'agent_message') {
+          finalMessage = event.item.text;
+          continue;
+        }
+        if ((strictClassification || strictAnalysis || strictVisualSpec) && event?.item?.type === 'file_change') {
+          throw workerError(
+            strictClassification ? 'CLASSIFICATION_WRITE_ATTEMPT'
+              : strictVisualSpec ? 'VISUAL_SPECS_WRITE_ATTEMPT' : 'ANALYSIS_WRITE_ATTEMPT',
+            strictClassification ? '提示词分支分类 Agent 不允许直接修改项目文件'
+              : strictVisualSpec ? '资产视觉规格 Agent 不允许直接修改项目文件'
+                : '单集分析 Agent 不允许直接修改项目文件'
+          );
+        }
+        if ((strictClassification || strictAnalysis || strictVisualSpec)
+          && (event?.item?.type === 'mcp_tool_call' || event?.item?.type === 'web_search')) {
+          throw workerError(
+            strictClassification ? 'CLASSIFICATION_TOOL_ATTEMPT'
+              : strictVisualSpec ? 'VISUAL_SPECS_TOOL_ATTEMPT' : 'ANALYSIS_EXTERNAL_TOOL_ATTEMPT',
+            strictClassification ? '提示词分支分类 Agent 不允许调用外部工具'
+              : strictVisualSpec ? '资产视觉规格 Agent 不允许调用外部工具'
+                : '单集分析 Agent 不允许调用外部工具'
+          );
+        }
+        if (strictVisualSpec && event?.item?.type === 'command_execution') {
+          throw workerError('VISUAL_SPECS_COMMAND_ATTEMPT', '资产视觉规格 Agent 不允许执行命令');
+        }
+        if (strictAnalysis && event?.item?.type === 'command_execution' && event.item.status === 'failed') {
+          const exitCode = Number.isInteger(event.item.exit_code) ? `（退出码 ${event.item.exit_code}）` : '';
+          const detail = sanitizeAgentText(event.item.aggregated_output, projectRoot)
+            .replace(/\s+/gu, ' ')
+            .slice(0, 240);
+          const command = sanitizeAgentText(event.item.command, projectRoot)
+            .replace(/\s+/gu, ' ')
+            .slice(0, 160);
+          lastAnalysisCommandError = `单集分析只读查询命令执行失败${exitCode}`
+            + `${command ? `；命令：${command}` : ''}`
+            + `${detail ? `；输出：${detail}` : ''}`;
+          emitProgress(`Codex Agent 只读命令失败，正在尝试恢复：${lastAnalysisCommandError}`);
+          continue;
+        }
+        if (strictAnalysis && event?.item?.type === 'error') {
+          lastItemError = sanitizeAgentText(event.item.message, projectRoot).slice(0, 240)
+            || 'SDK 报告了未提供详情的非致命提示';
+          emitProgress(`Codex Agent 非致命提示：${lastItemError}`);
+          continue;
+        }
+        if (
+          strictClassification
+          && event?.item?.type === 'command_execution'
+          && /(?:get_next_image_job|update_image_progress|build_image_queue|image[_ -]?gen)/iu.test(event.item.command || '')
+        ) {
+          throw workerError('CLASSIFICATION_COMMAND_REJECTED', '提示词分支分类 Agent 尝试执行受保护的生产命令');
+        }
+        if (event?.type === 'turn.failed') {
+          throw new Error(event.error?.message || 'Codex turn failed');
+        }
+        if (event?.type === 'turn.completed') turnCompleted = true;
+        emitProgress(safeEventMessage(event));
+      }
+    } catch (error) {
+      if (abortError) throw abortError;
+      throw classifyRuntimeError(error);
+    }
+    if (!turnCompleted) {
+      if (lastStreamError) throw classifyRuntimeError(new Error(lastStreamError));
+      throw workerError('CODEX_AGENT_FAILED', 'Codex Agent 未正常结束');
+    }
+    if (!finalMessage && strictAnalysis && lastAnalysisCommandError) {
+      throw workerError('ANALYSIS_READ_COMMAND_FAILED', lastAnalysisCommandError);
+    }
+    if (!finalMessage && strictAnalysis && lastItemError) {
+      throw workerError('ANALYSIS_AGENT_ERROR', `单集分析未返回完成回执：${lastItemError}`);
+    }
+    return finalMessage;
+  };
+
+  const consume = async () => {
+    const modelLabel = request.runtimeConfig?.model ?? await resolveModelLabel();
+    const reasoningLabel = request.runtimeConfig?.reasoningEffort;
+    const runtimeLabel = reasoningLabel ? `${modelLabel} / ${reasoningLabel}` : modelLabel;
+    emitProgress(request.action === 'analyze-screenplay'
+      ? `分析模型：${runtimeLabel}；开始逐集分析`
+      : `Codex 配置：${runtimeLabel}；开始执行`);
+    if (request.action === 'analyze-screenplay') {
+      let progress = await loadAnalysisProgress();
+      const totalEpisodes = progress.discoveredEpisodes.length;
+      let episode = nextAnalysisEpisode(progress);
+      let processedCount = 0;
+      let codex = null;
+      while (episode !== null) {
+        resetIdleTimer();
+        emitProgress(`正在分析第 ${episode} 集（${progress.completedEpisodes.length + 1}/${totalEpisodes}）`);
+        await prepareAnalysisEpisode({
+          projectRoot,
+          episode,
+          resume: progress.currentEpisode === episode,
+          signal: controller.signal,
+          onActivity: resetIdleTimer,
+          onProgress: emitProgress
+        });
+        if (abortError) throw abortError;
+        codex ??= await createSdk();
+        const finalMessage = await runThread({
+          codex,
+          prompt: promptForAnalysisEpisode(episode, pipelineSkill),
+          outputSchema: resultSchema(request.action, episode),
+          sandboxMode: 'read-only',
+          strictAnalysis: true
+        });
+        const parsed = parseFinalResult(finalMessage, request.action, projectRoot, episode);
+        if (parsed.processedCount !== 1 || parsed.analysis?.episode !== episode) {
+          throw workerError('INVALID_AGENT_RESULT', `第 ${episode} 集回执必须且只能计入一集`);
+        }
+        await verifySoftwarePipelineSkill(pipelineSkill);
+        await commitAnalysisEpisode({
+          projectRoot,
+          episode,
+          analysis: parsed.analysis,
+          signal: controller.signal,
+          onActivity: resetIdleTimer,
+          onProgress: emitProgress
+        });
+        if (abortError) throw abortError;
+        const committed = await loadAnalysisProgress();
+        verifyEpisodeCommit(progress, committed, episode);
+        processedCount += 1;
+        emitProgress(`第 ${episode} 集分析已完成并计入累计记录（${committed.completedEpisodes.length}/${totalEpisodes}）`);
+        progress = committed;
+        episode = nextAnalysisEpisode(progress);
+      }
+      const result = Object.freeze({
+        completed: true,
+        action: request.action,
+        summary: processedCount
+          ? `已逐集完成并累计 ${processedCount} 集分析`
+          : `全部 ${totalEpisodes} 集分析均已完成，无需重复处理`,
+        processedCount,
+        softwareSkill: publicSkillReceipt(pipelineSkill)
+      });
+      emit(`KA_AGENT_RESULT ${JSON.stringify(result)}`);
+      return result;
+    }
+    if (request.action === 'complete-asset-visual-specs') {
+      let state = await runVisualSpecScript({
+        projectRoot, command: 'start', signal: controller.signal, onActivity: resetIdleTimer
+      });
+      let processedCount = 0;
+      let codex = null;
+      emitProgress(`资产设定生成准备完成（${state.completed}/${state.total}）`);
+      while (!state.done) {
+        const current = await runVisualSpecScript({
+          projectRoot, command: 'next', signal: controller.signal, onActivity: resetIdleTimer
+        });
+        if (current.done) {
+          state = current;
+          break;
+        }
+        const categoryLabel = {
+          characters: '角色', creatures: '生物', extras: '群演', scenes: '场景', props: '道具'
+        }[current.asset?.category];
+        if (!categoryLabel || !current.asset?.assetId || !current.requestToken || !current.worldOverview) {
+          throw workerError('VISUAL_SPECS_PIPELINE_FAILED', '本地脚本返回的当前资产结构无效');
+        }
+        emitProgress(`正在生成${categoryLabel} ${current.asset.assetId} 的资产设定（${current.completed + 1}/${current.total}）`);
+        codex ??= await createSdk();
+        const finalMessage = await runThread({
+          codex,
+          prompt: visualSpecPrompt(current),
+          outputSchema: visualSpecResultSchema(current),
+          sandboxMode: 'read-only',
+          strictVisualSpec: true
+        });
+        const visualResult = parseAgentJson(finalMessage, '资产视觉规格');
+        validateSchemaValue(visualResult, visualSpecResultSchema(current));
+        if (!visualResult.completed) {
+          throw workerError('AGENT_REPORTED_INCOMPLETE', sanitizeAgentText(visualResult.summary, projectRoot));
+        }
+        await verifySoftwarePipelineSkill(pipelineSkill);
+        state = await runVisualSpecScript({
+          projectRoot,
+          command: 'commit',
+          payload: {
+            requestToken: visualResult.requestToken,
+            assetId: visualResult.assetId,
+            productionNotes: visualResult.productionNotes,
+            inferenceBasis: visualResult.inferenceBasis
+          },
+          signal: controller.signal,
+          onActivity: resetIdleTimer
+        });
+        processedCount += 1;
+        emitProgress(`${categoryLabel} ${visualResult.assetId} 的资产设定已保存（${state.completed}/${state.total}）`);
+      }
+      const result = Object.freeze({
+        completed: true,
+        action: request.action,
+        summary: processedCount
+          ? `已完成 ${processedCount} 项资产视觉规格并写回累计记录`
+          : '全部资产视觉规格均已完成，无需重复处理',
+        processedCount,
+        softwareSkill: publicSkillReceipt(pipelineSkill)
+      });
+      emit(`KA_AGENT_RESULT ${JSON.stringify(result)}`);
+      return result;
+    }
+    if (request.action === 'classify-prompt-branches') {
+      let session = null;
+      try {
+        session = await createBranchClassificationSession(projectRoot, {
+          signal: controller.signal,
+          onProgress: (message) => {
+            resetIdleTimer();
+            emitProgress(message);
+          }
+        });
+        const pageResults = [];
+        if (session.pages.length) {
+          const codex = await createSdk();
+          for (const page of session.pages) {
+            resetIdleTimer();
+            emitProgress(`正在判断提示词分支（第 ${page.page}/${session.pages.length} 页）`);
+            const finalMessage = await runThread({
+              codex,
+              prompt: classificationPagePrompt(page, pipelineSkill.path),
+              outputSchema: page.outputSchema,
+              sandboxMode: 'read-only',
+              strictClassification: true
+            });
+            pageResults.push(session.validatePageResult(
+              page,
+              parseAgentJson(finalMessage, '提示词分支分类')
+            ));
+          }
+        } else {
+          emitProgress('当前没有适用的条件分支，正在生成逐项空选择');
+        }
+        await verifySoftwarePipelineSkill(pipelineSkill);
+        const committed = await session.commit(pageResults);
+        const result = Object.freeze({
+          completed: true,
+          action: request.action,
+          summary: committed.semanticPageCount
+            ? `已完成 ${committed.processedCount} 项提示词分支判断并重建最终队列`
+            : `已为 ${committed.processedCount} 个队列项写入空分支选择并重建最终队列`,
+          processedCount: committed.processedCount,
+          softwareSkill: publicSkillReceipt(pipelineSkill)
+        });
+        emit(`KA_AGENT_RESULT ${JSON.stringify(result)}`);
+        return result;
+      } catch (error) {
+        await session?.rollback?.().catch((rollbackError) => {
+          throw new AggregateError([error, rollbackError], '提示词分支分类失败且回滚失败');
+        });
+        throw classifyRuntimeError(error);
+      }
+    }
+
+    const codex = await createSdk();
+    const finalMessage = await runThread({
+      codex,
+      prompt: promptForAction(request.action, pipelineSkill),
+      outputSchema: resultSchema(request.action),
+      sandboxMode: 'workspace-write'
+    });
+    await verifySoftwarePipelineSkill(pipelineSkill);
+    const parsed = parseFinalResult(finalMessage, request.action, projectRoot);
+    const result = Object.freeze({
+      ...parsed,
+      softwareSkill: publicSkillReceipt(pipelineSkill)
+    });
+    emit(`KA_AGENT_RESULT ${JSON.stringify(result)}`);
+    return result;
+  };
+
+  try {
+    return await Promise.race([consume(), timeoutPromise]);
+  } finally {
+    clearTimeout(idleTimer);
+    clearTimeout(totalTimer);
+    if (signal && externalAbort) signal.removeEventListener('abort', externalAbort);
+  }
+}
+
+const cliMain = async () => {
+  if (process.argv.length !== 7) {
+    throw workerError('INVALID_WORKER_INPUT', 'Agent worker 只接受固定动作、项目根、软件级 Skill 路径和模型配置');
+  }
+  const controller = new AbortController();
+  const interrupt = () => controller.abort();
+  process.once('SIGINT', interrupt);
+  process.once('SIGTERM', interrupt);
+  try {
+    await runCodexAgentAction(
+      {
+        action: process.argv[2],
+        projectRoot: process.argv[3],
+        runtimeConfig: {
+          model: process.argv[5] || null,
+          reasoningEffort: process.argv[6] || null
+        }
+      },
+      { signal: controller.signal, pipelineSkillPath: process.argv[4] }
+    );
+  } finally {
+    process.removeListener('SIGINT', interrupt);
+    process.removeListener('SIGTERM', interrupt);
+  }
+};
+
+const isDirectExecution = process.argv[1]
+  && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+
+if (isDirectExecution) {
+  cliMain().catch((rawError) => {
+    const error = classifyRuntimeError(rawError);
+    const safe = {
+      ok: false,
+      code: error.code,
+      message: sanitizeAgentText(error.message) || 'Codex Agent 任务失败'
+    };
+    process.stderr.write(`KA_AGENT_ERROR ${JSON.stringify(safe)}\n`);
+    process.exitCode = error.code === 'CODEX_INTERRUPTED'
+      ? 130
+      : error.code === 'CODEX_TOTAL_TIMEOUT' || error.code === 'CODEX_IDLE_TIMEOUT'
+        ? 124
+        : 1;
+  });
+}

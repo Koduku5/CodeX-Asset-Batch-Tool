@@ -1,0 +1,13 @@
+{
+  "id": "style.cg",
+  "slots": {
+    "productionType": "AAA级游戏制作"
+  },
+  "routeState": {
+    "status": "configured",
+    "message": ""
+  },
+  "fields": {
+    "Style/medium": "高品质国漫3D CG美术设定与渲染风格，采用偏写实的二次元审美，造型理想化但结构合理。模型轮廓清晰精致，皮肤、毛发、服装、环境及其他表面材质具有准确而克制的层次；使用中性塑形柔光和低至中饱和色调，画面高清、干净、细腻，可直接用于AAA级游戏制作。"
+  }
+}

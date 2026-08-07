@@ -1,0 +1,13 @@
+{
+  "id": "style.live-action",
+  "slots": {
+    "productionType": "真人电影"
+  },
+  "routeState": {
+    "status": "placeholder",
+    "message": "真人电影 Style/medium 尚待填写；该路由暂不领取任务。"
+  },
+  "fields": {
+    "Style/medium": "【占位：等待填写真人电影风格提示词】"
+  }
+}

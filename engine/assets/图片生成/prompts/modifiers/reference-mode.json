@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "family": "reference-mode",
+  "cardinality": "exactly-one",
+  "modifiers": [
+    {
+      "id": "reference.none",
+      "when": { "referenceMode": "none" },
+      "fragment": "reference.none"
+    },
+    {
+      "id": "reference.style",
+      "when": { "referenceMode": "style" },
+      "fragment": "reference.style"
+    },
+    {
+      "id": "reference.visual-consistency",
+      "when": { "referenceMode": "visual-consistency" },
+      "fragment": "reference.visual-consistency"
+    },
+    {
+      "id": "reference.custom",
+      "when": { "referenceMode": "custom" },
+      "fragment": "reference.custom"
+    }
+  ]
+}

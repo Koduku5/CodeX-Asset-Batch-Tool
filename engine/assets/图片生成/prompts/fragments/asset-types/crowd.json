@@ -1,0 +1,15 @@
+{
+  "id": "asset.crowd",
+  "fields": {
+    "Asset type": "background character concept design",
+    "Primary request": {
+      "concat": [
+        { "text": "为" },
+        { "slot": "productionType" },
+        { "text": "生成【Excel“制作说明”原文】所描述的可互换群体视觉体系。" }
+      ]
+    },
+    "Scene/backdrop": "纯白背景",
+    "Composition/framing": "16:9横向群体候选设定板。固定展示五个符合制作说明的可互换成员变体，采用单行五列排列；共同轮廓、物种或材料规律、制服或结构语言保持统一，必要差异清楚。每个成员使用符合其身体结构的中性全身姿态，尺度统一、完整可见、互不遮挡，不得把五个成员画成同一主体的多视图。"
+  }
+}

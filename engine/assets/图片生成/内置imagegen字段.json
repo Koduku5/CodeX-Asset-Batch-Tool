@@ -1,0 +1,321 @@
+{
+  "version": 11,
+  "sheetOrder": ["角色", "生物", "群演", "场景", "道具"],
+  "styleOrder": ["二次元", "CG", "真人"],
+  "fieldOrder": [
+    "Use case",
+    "Input images",
+    "Asset type",
+    "Primary request",
+    "Scene/backdrop",
+    "Style/medium",
+    "Composition/framing",
+    "Lighting/mood",
+    "Color/tonality",
+    "Materials/textures",
+    "Constraints",
+    "Avoid"
+  ],
+  "styles": {
+    "二次元": {
+      "displayName": "二次元",
+      "bySheet": {
+        "角色": {
+          "status": "configured",
+          "referencePolicy": "optional",
+          "message": "",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "character concept design" },
+            { "label": "Primary request", "value": "为日系二次元动画生成【Excel“制作说明”原文】所描述的角色。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "高完成度的日本二维数位动画美术设定稿，采用经过归纳的动画造型、清晰稳定的轮廓、干净明确的色块和接近赛璐璐动画的块面明暗。主要结构清楚利落，次要形体与表面纹理柔和简化；色彩关系稳定，材质表达准确，细节精致但不过度繁杂。画面锐度适中，视觉噪点低，保留细腻自然的手绘质感，整体风格统一，可直接用于正式动画制作。" },
+            { "label": "Composition/framing", "value": "16:9横向角色三视图设定图。展示同一角色的正面全身、严格侧面全身和背面全身，并附带角色正面脸部特写。所有全身视图等高、比例一致、脚底对齐、完整可见，彼此不得遮挡。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "生物": {
+          "status": "configured",
+          "referencePolicy": "optional",
+          "message": "",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "creature-concept" },
+            { "label": "Primary request", "value": "为日系二次元动画生成同一生物资产的五个不同可选外观变体；五个变体全部遵循以下共同硬设定：【Excel“制作说明”原文】。固定五个、不多不少，供用户选型。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "高完成度的日本二维数位动画美术设定稿，采用经过归纳的动画造型、清晰稳定的轮廓、干净明确的色块和接近赛璐璐动画的块面明暗。主要结构清楚利落，次要形体与表面纹理柔和简化；色彩关系稳定，材质表达准确，细节精致但不过度繁杂。画面锐度适中，视觉噪点低，保留细腻自然的手绘质感，整体风格统一，可直接用于正式动画制作。" },
+            { "label": "Composition/framing", "value": "16:9横向生物五候选设定板。固定展示同一生物资产的五个不同完整外观变体，采用单行五列横向排列，禁止换行或改成多行网格；每个候选都必须符合制作说明中的生物类型、尺度、核心解剖、肢体数量和关键识别约束，同时在轮廓比例、头部形态、表面结构或色彩组织上形成清晰且合理的设计差异。五个候选统一尺度、间距均匀、互不遮挡、主体完整不裁切，固定五个、不多不少，供用户选型。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "群演": {
+          "status": "configured",
+          "referencePolicy": "optional",
+          "message": "",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "background character concept design" },
+            { "label": "Primary request", "value": "为日系二次元动画生成【Excel“制作说明”原文】所描述的可互换群体视觉体系。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "高完成度的日本二维数位动画美术设定稿，采用经过归纳的动画造型、清晰稳定的轮廓、干净明确的色块和接近赛璐璐动画的块面明暗。主要结构清楚利落，次要形体与表面纹理柔和简化；色彩关系稳定，材质表达准确，细节精致但不过度繁杂。画面锐度适中，视觉噪点低，保留细腻自然的手绘质感，整体风格统一，可直接用于正式动画制作。" },
+            { "label": "Composition/framing", "value": "16:9横向群体候选设定板。固定展示五个符合制作说明的可互换成员变体，采用单行五列排列；共同轮廓、物种或材料规律、制服或结构语言保持统一，必要差异清楚。每个成员使用符合其身体结构的中性全身姿态，尺度统一、完整可见、互不遮挡，不得把五个成员画成同一主体的多视图。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "场景": {
+          "status": "configured",
+          "referencePolicy": "optional",
+          "message": "",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "【由 Agent 根据 Excel“制作说明”原文，在 environment concept art、interior set concept art、environment landmark design、architecture concept design、modular environment kit concept、foliage / natural asset concept design 中选择；无法判断更具体类型时使用 environment concept art】" },
+            { "label": "Primary request", "value": "为日系二次元动画生成【Excel“制作说明”原文】所描述的场景。" },
+            { "label": "Scene/backdrop", "value": "【由 Agent 根据 Excel“制作说明”原文填写具体的地点、环境、时代、时间和天气】" },
+            { "label": "Style/medium", "value": "高完成度的日本二维数位动画美术设定稿，采用经过归纳的动画造型、清晰稳定的轮廓、干净明确的色块和接近赛璐璐动画的块面明暗。主要结构清楚利落，次要形体与表面纹理柔和简化；色彩关系稳定，材质表达准确，细节精致但不过度繁杂。画面锐度适中，视觉噪点低，保留细腻自然的手绘质感，整体风格统一，可直接用于正式动画制作。" },
+            { "label": "Composition/framing", "value": "根据 Excel“制作说明”中的场景类型、空间结构、环境叙事目标、时间和天气，自动填写与该场景匹配的镜头景别、视线高度、透视关系、空间层次和视觉中心。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "道具": {
+          "status": "configured",
+          "referencePolicy": "optional",
+          "message": "",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "【由 Agent 根据 Excel“制作说明”原文，在 vehicle-concept、prop-object-concept、costume-concept 中选择；无法判断更具体类型时使用 prop-object-concept】" },
+            { "label": "Primary request", "value": "为日系二次元动画生成【Excel“制作说明”原文】所描述的道具。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "高完成度的日本二维数位动画美术设定稿，采用经过归纳的动画造型、清晰稳定的轮廓、干净明确的色块和接近赛璐璐动画的块面明暗。主要结构清楚利落，次要形体与表面纹理柔和简化；色彩关系稳定，材质表达准确，细节精致但不过度繁杂。画面锐度适中，视觉噪点低，保留细腻自然的手绘质感，整体风格统一，可直接用于正式动画制作。" },
+            { "label": "Composition/framing", "value": "单件道具完整展示，主体居中，轮廓清晰，不得裁切，四周保留充足且均匀的留白。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        }
+      }
+    },
+    "CG": {
+      "displayName": "CG",
+      "bySheet": {
+        "角色": {
+          "status": "configured",
+          "referencePolicy": "optional",
+          "message": "",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "character concept design" },
+            { "label": "Primary request", "value": "为AAA级游戏制作生成【Excel“制作说明”原文】所描述的角色。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "高品质国漫3D CG美术设定与渲染风格，采用偏写实的二次元审美，造型理想化但结构合理。模型轮廓清晰精致，皮肤、毛发、服装、环境及其他表面材质具有准确而克制的层次；使用中性塑形柔光和低至中饱和色调，画面高清、干净、细腻，可直接用于AAA级游戏制作。" },
+            { "label": "Composition/framing", "value": "16:9横向角色三视图设定图。展示同一角色的正面全身、严格侧面全身和背面全身，并附带角色正面脸部特写。所有全身视图等高、比例一致、脚底对齐、完整可见，彼此不得遮挡。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "生物": {
+          "status": "configured",
+          "referencePolicy": "optional",
+          "message": "",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "creature-concept" },
+            { "label": "Primary request", "value": "为AAA级游戏制作生成同一生物资产的五个不同可选外观变体；五个变体全部遵循以下共同硬设定：【Excel“制作说明”原文】。固定五个、不多不少，供用户选型。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "高品质国漫3D CG美术设定与渲染风格，采用偏写实的二次元审美，造型理想化但结构合理。模型轮廓清晰精致，皮肤、毛发、服装、环境及其他表面材质具有准确而克制的层次；使用中性塑形柔光和低至中饱和色调，画面高清、干净、细腻，可直接用于AAA级游戏制作。" },
+            { "label": "Composition/framing", "value": "16:9横向生物五候选设定板。固定展示同一生物资产的五个不同完整外观变体，采用单行五列横向排列，禁止换行或改成多行网格；每个候选都必须符合制作说明中的生物类型、尺度、核心解剖、肢体数量和关键识别约束，同时在轮廓比例、头部形态、表面结构或色彩组织上形成清晰且合理的设计差异。五个候选统一尺度、间距均匀、互不遮挡、主体完整不裁切，固定五个、不多不少，供用户选型。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "群演": {
+          "status": "configured",
+          "referencePolicy": "optional",
+          "message": "",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "background character concept design" },
+            { "label": "Primary request", "value": "为AAA级游戏制作生成【Excel“制作说明”原文】所描述的可互换群体视觉体系。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "高品质国漫3D CG美术设定与渲染风格，采用偏写实的二次元审美，造型理想化但结构合理。模型轮廓清晰精致，皮肤、毛发、服装、环境及其他表面材质具有准确而克制的层次；使用中性塑形柔光和低至中饱和色调，画面高清、干净、细腻，可直接用于AAA级游戏制作。" },
+            { "label": "Composition/framing", "value": "16:9横向群体候选设定板。固定展示五个符合制作说明的可互换成员变体，采用单行五列排列；共同轮廓、物种或材料规律、制服或结构语言保持统一，必要差异清楚。每个成员使用符合其身体结构的中性全身姿态，尺度统一、完整可见、互不遮挡，不得把五个成员画成同一主体的多视图。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "场景": {
+          "status": "configured",
+          "referencePolicy": "optional",
+          "message": "",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "【由 Agent 根据 Excel“制作说明”原文，在 environment concept art、interior set concept art、environment landmark design、architecture concept design、modular environment kit concept、foliage / natural asset concept design 中选择；无法判断更具体类型时使用 environment concept art】" },
+            { "label": "Primary request", "value": "为AAA级游戏制作生成【Excel“制作说明”原文】所描述的场景。" },
+            { "label": "Scene/backdrop", "value": "【由 Agent 根据 Excel“制作说明”原文填写具体的地点、环境、时代、时间和天气】" },
+            { "label": "Style/medium", "value": "高品质国漫3D CG美术设定与渲染风格，采用偏写实的二次元审美，造型理想化但结构合理。模型轮廓清晰精致，皮肤、毛发、服装、环境及其他表面材质具有准确而克制的层次；使用中性塑形柔光和低至中饱和色调，画面高清、干净、细腻，可直接用于AAA级游戏制作。" },
+            { "label": "Composition/framing", "value": "根据 Excel“制作说明”中的场景类型、空间结构、环境叙事目标、时间和天气，自动填写与该场景匹配的镜头景别、视线高度、透视关系、空间层次和视觉中心。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "道具": {
+          "status": "configured",
+          "referencePolicy": "optional",
+          "message": "",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "【由 Agent 根据 Excel“制作说明”原文，在 vehicle-concept、prop-object-concept、costume-concept 中选择；无法判断更具体类型时使用 prop-object-concept】" },
+            { "label": "Primary request", "value": "为AAA级游戏制作生成【Excel“制作说明”原文】所描述的道具。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "高品质国漫3D CG美术设定与渲染风格，采用偏写实的二次元审美，造型理想化但结构合理。模型轮廓清晰精致，皮肤、毛发、服装、环境及其他表面材质具有准确而克制的层次；使用中性塑形柔光和低至中饱和色调，画面高清、干净、细腻，可直接用于AAA级游戏制作。" },
+            { "label": "Composition/framing", "value": "单件道具完整展示，主体居中，轮廓清晰，不得裁切，四周保留充足且均匀的留白。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        }
+      }
+    },
+    "真人": {
+      "displayName": "真人",
+      "bySheet": {
+        "角色": {
+          "status": "placeholder",
+          "referencePolicy": "optional",
+          "message": "真人电影 Style/medium 尚待填写；该路由暂不领取任务。",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "character concept design" },
+            { "label": "Primary request", "value": "为真人电影生成【Excel“制作说明”原文】所描述的角色。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "【占位：等待填写真人电影风格提示词】" },
+            { "label": "Composition/framing", "value": "16:9横向角色三视图设定图。展示同一角色的正面全身、严格侧面全身和背面全身，并附带角色正面脸部特写。所有全身视图等高、比例一致、脚底对齐、完整可见，彼此不得遮挡。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "生物": {
+          "status": "placeholder",
+          "referencePolicy": "optional",
+          "message": "真人电影 Style/medium 尚待填写；该路由暂不领取任务。",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "creature-concept" },
+            { "label": "Primary request", "value": "为真人电影生成同一生物资产的五个不同可选外观变体；五个变体全部遵循以下共同硬设定：【Excel“制作说明”原文】。固定五个、不多不少，供用户选型。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "【占位：等待填写真人电影风格提示词】" },
+            { "label": "Composition/framing", "value": "16:9横向生物五候选设定板。固定展示同一生物资产的五个不同完整外观变体，采用单行五列横向排列，禁止换行或改成多行网格；每个候选都必须符合制作说明中的生物类型、尺度、核心解剖、肢体数量和关键识别约束，同时在轮廓比例、头部形态、表面结构或色彩组织上形成清晰且合理的设计差异。五个候选统一尺度、间距均匀、互不遮挡、主体完整不裁切，固定五个、不多不少，供用户选型。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "群演": {
+          "status": "placeholder",
+          "referencePolicy": "optional",
+          "message": "真人电影 Style/medium 尚待填写；该路由暂不领取任务。",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "background character concept design" },
+            { "label": "Primary request", "value": "为真人电影生成【Excel“制作说明”原文】所描述的可互换群体视觉体系。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "【占位：等待填写真人电影风格提示词】" },
+            { "label": "Composition/framing", "value": "16:9横向群体候选设定板。固定展示五个符合制作说明的可互换成员变体，采用单行五列排列；共同轮廓、物种或材料规律、制服或结构语言保持统一，必要差异清楚。每个成员使用符合其身体结构的中性全身姿态，尺度统一、完整可见、互不遮挡，不得把五个成员画成同一主体的多视图。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "场景": {
+          "status": "placeholder",
+          "referencePolicy": "optional",
+          "message": "真人电影 Style/medium 尚待填写；该路由暂不领取任务。",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "【由 Agent 根据 Excel“制作说明”原文，在 environment concept art、interior set concept art、environment landmark design、architecture concept design、modular environment kit concept、foliage / natural asset concept design 中选择；无法判断更具体类型时使用 environment concept art】" },
+            { "label": "Primary request", "value": "为真人电影生成【Excel“制作说明”原文】所描述的场景。" },
+            { "label": "Scene/backdrop", "value": "【由 Agent 根据 Excel“制作说明”原文填写具体的地点、环境、时代、时间和天气】" },
+            { "label": "Style/medium", "value": "【占位：等待填写真人电影风格提示词】" },
+            { "label": "Composition/framing", "value": "根据 Excel“制作说明”中的场景类型、空间结构、环境叙事目标、时间和天气，自动填写与该场景匹配的镜头景别、视线高度、透视关系、空间层次和视觉中心。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        },
+        "道具": {
+          "status": "placeholder",
+          "referencePolicy": "optional",
+          "message": "真人电影 Style/medium 尚待填写；该路由暂不领取任务。",
+          "promptFields": [
+            { "label": "Use case", "value": "stylized-concept" },
+            { "label": "Input images", "value": "" },
+            { "label": "Asset type", "value": "【由 Agent 根据 Excel“制作说明”原文，在 vehicle-concept、prop-object-concept、costume-concept 中选择；无法判断更具体类型时使用 prop-object-concept】" },
+            { "label": "Primary request", "value": "为真人电影生成【Excel“制作说明”原文】所描述的道具。" },
+            { "label": "Scene/backdrop", "value": "纯白背景" },
+            { "label": "Style/medium", "value": "【占位：等待填写真人电影风格提示词】" },
+            { "label": "Composition/framing", "value": "单件道具完整展示，主体居中，轮廓清晰，不得裁切，四周保留充足且均匀的留白。" },
+            { "label": "Lighting/mood", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Color/tonality", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Materials/textures", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Constraints", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" },
+            { "label": "Avoid", "value": "【由 Agent 根据 Excel“制作说明”原文填写】" }
+          ]
+        }
+      }
+    }
+  }
+}

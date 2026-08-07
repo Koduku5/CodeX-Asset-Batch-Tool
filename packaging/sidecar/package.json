@@ -1,0 +1,9 @@
+{
+  "name": "ka-asset-batch-sidecar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@openai/codex-sdk": "0.146.0"
+  }
+}

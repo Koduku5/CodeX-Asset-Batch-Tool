@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "skills": {
+    "ka-script-pipeline": {
+      "revision": 7,
+      "entry": "ka-script-pipeline/SKILL.md",
+      "sha256": "118f65134dd5dda65e8a834f6067c54b72fd6b05b8afae6b739391c2dd7f8d48"
+    },
+    "ka-episode-asset-analysis": {
+      "revision": 2,
+      "entry": "ka-episode-asset-analysis/SKILL.md",
+      "sha256": "7bb74eea0f0dd2c1116b8dd62015d6c1c376036dc0f2e21d92b3ed9963fbd143"
+    },
+    "ka-builtin-imagegen": {
+      "revision": 3,
+      "entry": "ka-builtin-imagegen/SKILL.md",
+      "sha256": "e93c2d80aadbae02a2898f9d66e378cc3badcae5b06058195d4f792a526e09c8"
+    }
+  }
+}

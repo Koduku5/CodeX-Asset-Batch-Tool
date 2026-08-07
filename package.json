@@ -1,0 +1,53 @@
+{
+  "name": "ka-asset-batch",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "KA Asset Batch 的单窗口生产控制与 Prompt Studio 功能原型",
+  "scripts": {
+    "start": "node src/server/server.mjs",
+    "dev": "node tools/dev.mjs",
+    "build": "vite build --configLoader native",
+    "typecheck": "tsc -b",
+    "check:desktop": "dotnet build ./desktop/PromptStudio.Desktop/PromptStudio.Desktop.csproj --nologo",
+    "preview": "npm run build && npm start",
+    "test": "node --test tests/*.test.mjs",
+    "check:server:modules": "node --check src/server/codex-agent/common-prompt.mjs && node --check src/server/codex-agent/analyze-screenplay.mjs && node --check src/server/codex-agent/build-world-overview.mjs && node --check src/server/codex-agent/complete-asset-visual-specs.mjs && node --check src/server/codex-agent/classify-prompt-branches.mjs && node --check src/server/codex-agent/contracts.mjs && node --check src/server/pipeline-task/action-specs.mjs",
+    "check:server": "npm run check:server:modules && node --check src/ui/services/batch-control-adapter.mjs && node --check src/ui/services/codex-status-adapter.mjs && node --check src/ui/services/codex-agent-chat-adapter.mjs && node --check src/ui/services/imagegen-handoff-adapter.mjs && node --check src/ui/services/pending-asset-adapter.mjs && node --check src/ui/services/route-module-workbench.mjs && node --check src/server/server.mjs && node --check src/server/desktop-entry.mjs && node --check src/server/software-workspace.mjs && node --check src/server/reference-image-store.mjs && node --check src/server/builtin-batch-service.mjs && node --check src/server/codex-imagegen-handoff.mjs && node --check src/server/codex-sdk-status.mjs && node --check src/server/codex-runtime-config.mjs && node --check src/server/codex-sdk-options.mjs && node --check src/server/codex-agent-chat-service.mjs && node --check src/server/pending-asset-service.mjs && node --check src/server/pipeline-task-runner.mjs && node --check src/server/prompt-branch-classification.mjs && node --check src/server/codex-agent-worker.mjs",
+    "check": "npm run check:server && npm run typecheck && npm run build && npm test && npm run check:desktop",
+    "build:release": "powershell -NoProfile -ExecutionPolicy Bypass -File ./packaging/build-release.ps1",
+    "build:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File ./packaging/build-installer.ps1"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "0.146.0",
+    "@radix-ui/react-alert-dialog": "^1.1.23",
+    "@radix-ui/react-checkbox": "^1.3.11",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@radix-ui/react-label": "^2.1.15",
+    "@radix-ui/react-progress": "^1.1.16",
+    "@radix-ui/react-scroll-area": "^1.2.18",
+    "@radix-ui/react-select": "^2.3.7",
+    "@radix-ui/react-separator": "^1.1.15",
+    "@radix-ui/react-slot": "^1.3.3",
+    "@radix-ui/react-switch": "^1.3.7",
+    "@radix-ui/react-tabs": "^1.1.21",
+    "@radix-ui/react-tooltip": "^1.2.16",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.28.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwind-merge": "^3.6.0",
+    "tw-animate-css": "^1.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.0"
+  }
+}

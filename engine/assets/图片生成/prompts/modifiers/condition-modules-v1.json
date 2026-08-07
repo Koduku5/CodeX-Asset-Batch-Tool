@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "cardinality": "single-dominant-per-family",
+  "allowedTargetFields": [
+    "Primary request",
+    "Scene/backdrop",
+    "Style/medium",
+    "Composition/framing",
+    "Lighting/mood",
+    "Color/tonality",
+    "Materials/textures",
+    "Constraints",
+    "Avoid"
+  ],
+  "modules": []
+}

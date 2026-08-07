@@ -1,0 +1,13 @@
+{
+  "id": "common.base",
+  "referencePolicy": "optional",
+  "fields": {
+    "Use case": "stylized-concept",
+    "Input images": "",
+    "Lighting/mood": "【由 Agent 根据 Excel“制作说明”原文填写】",
+    "Color/tonality": "【由 Agent 根据 Excel“制作说明”原文填写】",
+    "Materials/textures": "【由 Agent 根据 Excel“制作说明”原文填写】",
+    "Constraints": "【由 Agent 根据 Excel“制作说明”原文填写】",
+    "Avoid": "【由 Agent 根据 Excel“制作说明”原文填写】"
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "剧本资产拆分规则"
+  short_description: "逐集提炼世界观事实，判定五类视觉资产并返回固定嵌套结果"
+  default_prompt: "使用 $ka-episode-asset-analysis 分析当前单集剧本并按固定嵌套模板返回世界观事实与资产。"

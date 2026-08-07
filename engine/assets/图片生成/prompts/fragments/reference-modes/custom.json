@@ -1,0 +1,21 @@
+{
+  "id": "reference.custom",
+  "activeFieldSchema": "withInputImages",
+  "operations": [
+    {
+      "op": "set",
+      "field": "Use case",
+      "value": "根据 Primary request 的内容由 ImageGen 自行判断填入"
+    },
+    {
+      "op": "set",
+      "field": "Input images",
+      "value": { "call": "customInputImages", "args": [{ "slot": "referenceCount" }] }
+    },
+    {
+      "op": "set",
+      "field": "Primary request",
+      "value": "【请填写 Primary request，并删除本提示】"
+    }
+  ]
+}

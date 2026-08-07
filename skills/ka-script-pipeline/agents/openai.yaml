@@ -1,0 +1,4 @@
+interface:
+  display_name: "KA 剧本资产流水线"
+  short_description: "拆分完整剧本、分析全剧资产并建立独立项目可恢复出图队列"
+  default_prompt: "使用 $ka-script-pipeline 处理当前项目剧本并建立可恢复的内置出图队列。"

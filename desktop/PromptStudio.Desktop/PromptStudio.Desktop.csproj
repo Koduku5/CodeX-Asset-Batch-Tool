@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>KA.PromptStudio</AssemblyName>
+    <RootNamespace>KA.PromptStudio.Desktop</RootNamespace>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Product>KA Asset Batch</Product>
+    <Company>KA</Company>
+    <Description>剧本资产分析、提示词路由与批量出图桌面工作台</Description>
+    <PublishSingleFile>false</PublishSingleFile>
+    <SatelliteResourceLanguages>zh-Hans;en-US</SatelliteResourceLanguages>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+    <DebugSymbols Condition="'$(Configuration)' == 'Release'">false</DebugSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\src\server\**\*.mjs">
+      <Link>sidecar\src\server\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\package.json;..\..\package-lock.json">
+      <Link>sidecar\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\engine\**\*" Exclude="..\..\engine\**\__pycache__\**;..\..\engine\**\*.pyc">
+      <Link>sidecar\engine\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\skills\**\*">
+      <Link>sidecar\skills\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="BuildReactRenderer" BeforeTargets="Build">
+    <Exec Command="npm run build" WorkingDirectory="$(MSBuildProjectDirectory)\..\.." />
+  </Target>
+
+  <Target Name="CopyReactRendererToOutput" AfterTargets="Build" DependsOnTargets="BuildReactRenderer">
+    <ItemGroup>
+      <ReactRendererAsset Include="..\..\dist\renderer\assets\*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(OutDir)sidecar\dist\renderer;$(OutDir)sidecar\runtime" />
+    <Copy SourceFiles="..\..\dist\renderer\index.html" DestinationFolder="$(OutDir)sidecar\dist\renderer" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ReactRendererAsset)" DestinationFolder="$(OutDir)sidecar\dist\renderer\assets" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyReactRendererToPublish" AfterTargets="Publish" DependsOnTargets="BuildReactRenderer">
+    <ItemGroup>
+      <ReactRendererPublishAsset Include="..\..\dist\renderer\assets\*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(PublishDir)sidecar\dist\renderer;$(PublishDir)sidecar\runtime" />
+    <Copy SourceFiles="..\..\dist\renderer\index.html" DestinationFolder="$(PublishDir)sidecar\dist\renderer" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ReactRendererPublishAsset)" DestinationFolder="$(PublishDir)sidecar\dist\renderer\assets" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="RemoveUnusedWebView2WinFormsReference" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.WinForms'" />
+    </ItemGroup>
+  </Target>
+
+</Project>

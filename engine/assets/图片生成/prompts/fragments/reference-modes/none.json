@@ -1,0 +1,8 @@
+{
+  "id": "reference.none",
+  "activeFieldSchema": "withoutInputImages",
+  "operations": [
+    { "op": "set", "field": "Use case", "value": "stylized-concept" },
+    { "op": "set", "field": "Input images", "value": "" }
+  ]
+}

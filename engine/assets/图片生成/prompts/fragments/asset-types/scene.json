@@ -1,0 +1,15 @@
+{
+  "id": "asset.scene",
+  "fields": {
+    "Asset type": "【由 Agent 根据 Excel“制作说明”原文，在 environment concept art、interior set concept art、environment landmark design、architecture concept design、modular environment kit concept、foliage / natural asset concept design 中选择；无法判断更具体类型时使用 environment concept art】",
+    "Primary request": {
+      "concat": [
+        { "text": "为" },
+        { "slot": "productionType" },
+        { "text": "生成【Excel“制作说明”原文】所描述的场景。" }
+      ]
+    },
+    "Scene/backdrop": "【由 Agent 根据 Excel“制作说明”原文填写具体的地点、环境、时代、时间和天气】",
+    "Composition/framing": "根据 Excel“制作说明”中的场景类型、空间结构、环境叙事目标、时间和天气，自动填写与该场景匹配的镜头景别、视线高度、透视关系、空间层次和视觉中心。"
+  }
+}

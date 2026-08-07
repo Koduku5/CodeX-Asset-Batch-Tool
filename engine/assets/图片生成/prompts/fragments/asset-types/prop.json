@@ -1,0 +1,15 @@
+{
+  "id": "asset.prop",
+  "fields": {
+    "Asset type": "【由 Agent 根据 Excel“制作说明”原文，在 vehicle-concept、prop-object-concept、costume-concept 中选择；无法判断更具体类型时使用 prop-object-concept】",
+    "Primary request": {
+      "concat": [
+        { "text": "为" },
+        { "slot": "productionType" },
+        { "text": "生成【Excel“制作说明”原文】所描述的道具。" }
+      ]
+    },
+    "Scene/backdrop": "纯白背景",
+    "Composition/framing": "单件道具完整展示，主体居中，轮廓清晰，不得裁切，四周保留充足且均匀的留白。"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "sheetOrder": ["角色", "生物", "群演", "场景", "道具"],
+  "routes": {
+    "角色": {
+      "outputFolder": "角色"
+    },
+    "生物": {
+      "outputFolder": "生物"
+    },
+    "群演": {
+      "outputFolder": "群演"
+    },
+    "场景": {
+      "outputFolder": "场景"
+    },
+    "道具": {
+      "outputFolder": "道具"
+    }
+  }
+}

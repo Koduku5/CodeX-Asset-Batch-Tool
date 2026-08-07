@@ -1,0 +1,15 @@
+{
+  "id": "asset.character",
+  "fields": {
+    "Asset type": "character concept design",
+    "Primary request": {
+      "concat": [
+        { "text": "为" },
+        { "slot": "productionType" },
+        { "text": "生成【Excel“制作说明”原文】所描述的角色。" }
+      ]
+    },
+    "Scene/backdrop": "纯白背景",
+    "Composition/framing": "16:9横向角色三视图设定图。展示同一角色的正面全身、严格侧面全身和背面全身，并附带角色正面脸部特写。所有全身视图等高、比例一致、脚底对齐、完整可见，彼此不得遮挡。"
+  }
+}

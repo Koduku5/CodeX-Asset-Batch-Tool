@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "id": "builtin.anime.character",
+      "when": { "style": "anime", "asset": "character" },
+      "compose": ["common.base", "style.anime", "asset.character"]
+    },
+    {
+      "id": "builtin.anime.creature",
+      "when": { "style": "anime", "asset": "creature" },
+      "compose": ["common.base", "style.anime", "asset.creature"]
+    },
+    {
+      "id": "builtin.anime.crowd",
+      "when": { "style": "anime", "asset": "crowd" },
+      "compose": ["common.base", "style.anime", "asset.crowd"]
+    },
+    {
+      "id": "builtin.anime.scene",
+      "when": { "style": "anime", "asset": "scene" },
+      "compose": ["common.base", "style.anime", "asset.scene"]
+    },
+    {
+      "id": "builtin.anime.prop",
+      "when": { "style": "anime", "asset": "prop" },
+      "compose": ["common.base", "style.anime", "asset.prop"]
+    },
+    {
+      "id": "builtin.cg.character",
+      "when": { "style": "cg", "asset": "character" },
+      "compose": ["common.base", "style.cg", "asset.character"]
+    },
+    {
+      "id": "builtin.cg.creature",
+      "when": { "style": "cg", "asset": "creature" },
+      "compose": ["common.base", "style.cg", "asset.creature"]
+    },
+    {
+      "id": "builtin.cg.crowd",
+      "when": { "style": "cg", "asset": "crowd" },
+      "compose": ["common.base", "style.cg", "asset.crowd"]
+    },
+    {
+      "id": "builtin.cg.scene",
+      "when": { "style": "cg", "asset": "scene" },
+      "compose": ["common.base", "style.cg", "asset.scene"]
+    },
+    {
+      "id": "builtin.cg.prop",
+      "when": { "style": "cg", "asset": "prop" },
+      "compose": ["common.base", "style.cg", "asset.prop"]
+    },
+    {
+      "id": "builtin.live-action.character",
+      "when": { "style": "live-action", "asset": "character" },
+      "compose": ["common.base", "style.live-action", "asset.character"]
+    },
+    {
+      "id": "builtin.live-action.creature",
+      "when": { "style": "live-action", "asset": "creature" },
+      "compose": ["common.base", "style.live-action", "asset.creature"]
+    },
+    {
+      "id": "builtin.live-action.crowd",
+      "when": { "style": "live-action", "asset": "crowd" },
+      "compose": ["common.base", "style.live-action", "asset.crowd"]
+    },
+    {
+      "id": "builtin.live-action.scene",
+      "when": { "style": "live-action", "asset": "scene" },
+      "compose": ["common.base", "style.live-action", "asset.scene"]
+    },
+    {
+      "id": "builtin.live-action.prop",
+      "when": { "style": "live-action", "asset": "prop" },
+      "compose": ["common.base", "style.live-action", "asset.prop"]
+    }
+  ]
+}
