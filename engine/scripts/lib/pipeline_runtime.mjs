@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { inflateSync } from "node:zlib";
 
 import {
+  ASSET_BINDING_MARKERS,
   bindAssetPromptFields,
   compileLegacyDefinition,
   loadPromptCatalogSync,
@@ -640,12 +641,122 @@ export const validateImageRoutes = (config) => {
 export const normalizePromptText = (value) =>
   String(value ?? "").replace(/\r\n?/g, "\n").trim();
 
-const parsePromptFields = (promptText) => {
+export const AGENT_PLACEHOLDER_CONTRACT_VERSION = 1;
+const AGENT_PLACEHOLDER_PREFIXES = ["【由agent 具体判断说明：", "【由 Agent "];
+const AGENT_PLACEHOLDER_PATTERN =
+  /【由agent 具体判断说明：([^\r\n【】]+)】|【由 Agent ([^\r\n【】]+)】/gu;
+
+const textRanges = (text, needle) => {
+  const ranges = [];
+  if (!needle) return ranges;
+  let offset = 0;
+  while (offset <= text.length - needle.length) {
+    const start = text.indexOf(needle, offset);
+    if (start < 0) break;
+    ranges.push({ start, end: start + needle.length });
+    offset = start + Math.max(needle.length, 1);
+  }
+  return ranges;
+};
+
+const rangeContains = (ranges, start, end = start + 1) =>
+  ranges.some((range) => start >= range.start && end <= range.end);
+
+export const analyzeAgentPromptFields = (
+  fields,
+  { ignoredValues = [], ignoredSourceRanges = [] } = {},
+) => {
+  const items = [];
+  const errors = [];
+  if (!Array.isArray(fields)) {
+    return {
+      version: AGENT_PLACEHOLDER_CONTRACT_VERSION,
+      valid: false,
+      items,
+      errors: ["提示词字段不是数组"],
+    };
+  }
+  for (const [fieldIndex, field] of fields.entries()) {
+    const label = normalizePromptText(field?.label);
+    const value = normalizePromptText(field?.value);
+    const ignoredRanges = [
+      ...(Array.isArray(ignoredValues) ? ignoredValues : []).flatMap((ignoredValue) =>
+        textRanges(value, normalizePromptText(ignoredValue)),
+      ),
+      ...(Array.isArray(ignoredSourceRanges) ? ignoredSourceRanges : []).filter(
+        (range) =>
+          range?.fieldIndex === fieldIndex &&
+          Number.isInteger(range.start) &&
+          Number.isInteger(range.end) &&
+          range.start >= 0 &&
+          range.end > range.start &&
+          range.end <= value.length,
+      ),
+    ];
+    const validRanges = [];
+    let occurrence = 0;
+    for (const match of value.matchAll(AGENT_PLACEHOLDER_PATTERN)) {
+      const marker = match[0];
+      const start = match.index;
+      const end = start + marker.length;
+      if (rangeContains(ignoredRanges, start, end)) continue;
+      validRanges.push({ start, end });
+      const instruction = normalizePromptText(match[1] ?? match[2]);
+      if (!instruction) {
+        errors.push(`${label || "未知字段"} 的 Agent 占位符缺少判断说明`);
+        continue;
+      }
+      occurrence += 1;
+      items.push({
+        field: label,
+        occurrence,
+        mode: value === marker ? "field" : "inline",
+        marker,
+        instruction,
+      });
+    }
+    for (const prefix of AGENT_PLACEHOLDER_PREFIXES) {
+      let prefixOffset = 0;
+      while (prefixOffset < value.length) {
+        const start = value.indexOf(prefix, prefixOffset);
+        if (start < 0) break;
+        const covered = rangeContains(ignoredRanges, start) || rangeContains(validRanges, start);
+        if (!covered) {
+          errors.push(`${label || "未知字段"} 含未闭合或不符合格式的 Agent 占位符`);
+        }
+        prefixOffset = start + prefix.length;
+      }
+    }
+  }
+  return {
+    version: AGENT_PLACEHOLDER_CONTRACT_VERSION,
+    valid: errors.length === 0,
+    items,
+    errors,
+  };
+};
+
+const normalizeCustomFieldLabels = (value) => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 24) return null;
+  const labels = value.map((label) => typeof label === "string" ? normalizePromptText(label) : "");
+  const normalized = labels.map((label) => label.toLocaleLowerCase("zh-CN"));
+  const reserved = new Set(BUILTIN_PROMPT_FIELD_ORDER.map((label) => label.toLocaleLowerCase("zh-CN")));
+  if (
+    labels.some((label, index) =>
+      !label || label !== value[index] || label.length > 80 || /[:\r\n]/u.test(label) || reserved.has(normalized[index]),
+    ) || new Set(normalized).size !== labels.length
+  ) return null;
+  return labels;
+};
+
+const parsePromptFields = (promptText, customFieldLabels = []) => {
   const fields = [];
+  const allowedLabels = new Set([...BUILTIN_PROMPT_FIELD_ORDER, ...customFieldLabels]);
   for (const line of normalizePromptText(promptText).split("\n")) {
     const match = line.match(/^([^:\n]{1,80}):\s?(.*)$/);
     const label = match ? normalizePromptText(match[1]) : "";
-    if (match && BUILTIN_PROMPT_FIELD_ORDER.includes(label)) {
+    if (match && allowedLabels.has(label)) {
       fields.push({ label, value: match[2] });
     } else if (fields.length) {
       fields[fields.length - 1].value += `${fields[fields.length - 1].value ? "\n" : ""}${line}`;
@@ -656,13 +767,17 @@ const parsePromptFields = (promptText) => {
   return fields;
 };
 
-const promptFieldSchemaMatches = (route, fields) => {
-  const expectedLabels = route.promptFields.map((field) =>
-    normalizePromptText(field.label),
-  );
+const promptFieldSchemaMatches = (route, fields, customFieldLabels = []) => {
+  const expectedLabels = [
+    ...route.promptFields.map((field) => normalizePromptText(field.label)),
+    ...customFieldLabels,
+  ];
+  const actualLabels = fields.map((field) => field.label);
+  const expectedLabelSet = new Set(expectedLabels);
   return (
-    fields.length === expectedLabels.length &&
-    fields.every((field, index) => field.label === expectedLabels[index])
+    actualLabels.length === expectedLabels.length &&
+    new Set(actualLabels).size === actualLabels.length &&
+    actualLabels.every((label) => expectedLabelSet.has(label))
   );
 };
 
@@ -724,6 +839,95 @@ const bindPromptValue = (value, productionNotes) =>
     { productionNotes: cleanText(productionNotes) },
   ).value;
 
+const bindProductionNotesWithRanges = (templateValue, productionNotes) => {
+  const template = normalizePromptText(templateValue);
+  const notes = String(productionNotes ?? "").replace(/\r\n?/g, "\n");
+  const ranges = [];
+  let value = "";
+  let offset = 0;
+  while (offset <= template.length) {
+    const markerOffset = template.indexOf(ASSET_BINDING_MARKERS.productionNotes, offset);
+    if (markerOffset < 0) {
+      value += template.slice(offset);
+      break;
+    }
+    value += template.slice(offset, markerOffset);
+    const start = value.length;
+    value += notes;
+    ranges.push({ start, end: value.length });
+    offset = markerOffset + ASSET_BINDING_MARKERS.productionNotes.length;
+  }
+  const leadingTrim = value.length - value.trimStart().length;
+  const normalizedValue = value.trim();
+  return {
+    value: normalizedValue,
+    ranges: ranges
+      .map(({ start, end }) => ({
+        start: Math.max(0, start - leadingTrim),
+        end: Math.min(normalizedValue.length, end - leadingTrim),
+      }))
+      .filter(({ start, end }) => end > start),
+  };
+};
+
+const productionNoteSourceRanges = (fields, unboundPromptFields, productionNotes) => {
+  const templatesByLabel = new Map(
+    unboundPromptFields.map(({ label, value }) => [normalizePromptText(label), value]),
+  );
+  return fields.flatMap((field, fieldIndex) => {
+    const tracked = bindProductionNotesWithRanges(
+      templatesByLabel.get(normalizePromptText(field?.label)),
+      productionNotes,
+    );
+    return textRanges(normalizePromptText(field?.value), tracked.value).flatMap(
+      ({ start: templateStart }) =>
+        tracked.ranges.map(({ start, end }) => ({
+          fieldIndex,
+          start: templateStart + start,
+          end: templateStart + end,
+        })),
+    );
+  });
+};
+
+const productionNoteSourceAmbiguities = (
+  fields,
+  unboundPromptFields,
+  productionNotes,
+  preciseRanges,
+) => {
+  const notes = normalizePromptText(productionNotes);
+  if (!notes) return [];
+  const notesAnalysis = analyzeAgentPromptFields([
+    { label: "productionNotes", value: notes },
+  ]);
+  if (notesAnalysis.items.length === 0 && notesAnalysis.errors.length === 0) return [];
+  const templatesByLabel = new Map(
+    unboundPromptFields.map(({ label, value }) => [normalizePromptText(label), value]),
+  );
+  return fields.flatMap((field, fieldIndex) => {
+    const label = normalizePromptText(field?.label);
+    const template = normalizePromptText(templatesByLabel.get(label));
+    const bindingCount = textRanges(
+      template,
+      ASSET_BINDING_MARKERS.productionNotes,
+    ).length;
+    const noteCount = textRanges(normalizePromptText(field?.value), notes).length;
+    if (!bindingCount || !noteCount) return [];
+    const preciseCount = new Set(
+      preciseRanges
+        .filter((range) => range.fieldIndex === fieldIndex)
+        .map((range) => `${range.start}:${range.end}`),
+    ).size;
+    if (preciseCount >= Math.min(bindingCount, noteCount)) return [];
+    return [{
+      fieldIndex,
+      label,
+      error: `${label || "未知字段"} 的 productionNotes 替换来源歧义：制作说明含 Agent 占位符，且编辑后无法精确定位其注入区间`,
+    }];
+  });
+};
+
 const validateReferenceSnapshot = (snapshot) =>
   hasExactKeys(snapshot, ["path", "sourceName", "size", "sha256"]) &&
   cleanText(snapshot.path) &&
@@ -757,10 +961,13 @@ const validateBuiltinPromptOverridesBySheet = (promptOverridesBySheet) =>
   hasExactKeys(promptOverridesBySheet, IMAGE_SHEET_ORDER) &&
   IMAGE_SHEET_ORDER.every((sheetName) => {
     const override = promptOverridesBySheet[sheetName];
+    const customFieldLabels = normalizeCustomFieldLabels(override?.customFieldLabels);
     return (
-      hasExactKeys(override, ["routeMode", "promptText"]) &&
+      (hasExactKeys(override, ["routeMode", "promptText"]) ||
+        hasExactKeys(override, ["routeMode", "promptText", "customFieldLabels"])) &&
       ["default", "reference"].includes(override.routeMode) &&
-      typeof override.promptText === "string"
+      typeof override.promptText === "string" &&
+      customFieldLabels !== null
     );
   });
 
@@ -1034,6 +1241,14 @@ export const makeBuiltinPromptSpec = (definition, batch, item) => {
     productionNotes: item?.productionNotes,
     selectedConditionModuleIds: item?.selectedConditionModuleIds ?? [],
   });
+  const unboundResolvedTemplate = resolveCatalogPromptTemplate({
+    style: styleId,
+    asset: sheetName,
+    referenceMode,
+    referenceCount: referenceImages.length,
+    productionNotes: ASSET_BINDING_MARKERS.productionNotes,
+    selectedConditionModuleIds: item?.selectedConditionModuleIds ?? [],
+  });
   const hasConditionResolution =
     Array.isArray(item?.selectedConditionModuleIds) && item.selectedConditionModuleIds.length > 0;
   const unmodifiedTemplate = hasConditionResolution
@@ -1060,8 +1275,11 @@ export const makeBuiltinPromptSpec = (definition, batch, item) => {
   const editedPromptText = normalizePromptText(
     override?.routeMode === routeMode ? override.promptText : defaultPromptText,
   );
-  const parsedFields = parsePromptFields(editedPromptText);
-  const fieldSchemaValid = promptFieldSchemaMatches(route, parsedFields);
+  const customFieldLabels = override?.routeMode === routeMode
+    ? normalizeCustomFieldLabels(override.customFieldLabels) ?? []
+    : [];
+  const parsedFields = parsePromptFields(editedPromptText, customFieldLabels);
+  const fieldSchemaValid = promptFieldSchemaMatches(route, parsedFields, customFieldLabels);
   const overrideApplied =
     override?.routeMode === routeMode && editedPromptText !== unmodifiedPromptText;
   const managedPrimaryRequestField = route.promptFields.find(
@@ -1071,6 +1289,14 @@ export const makeBuiltinPromptSpec = (definition, batch, item) => {
   const managedInputImagesField = route.promptFields.find(
     (field) => field.label === "Input images",
   );
+  const productionNoteBindingSourceFields = referenceMode === "custom"
+    ? []
+    : [{
+        label: "Primary request",
+        value: routeMode === "reference"
+          ? managedPrimaryRequestField?.value
+          : parsedFields.find((field) => field.label === "Primary request")?.value,
+      }];
   const insufficientUnificationImages =
     routeMode === "reference" &&
     referenceMode === "visual_consistency" &&
@@ -1131,6 +1357,48 @@ export const makeBuiltinPromptSpec = (definition, batch, item) => {
   const promptText = fieldSchemaValid
     ? renderPromptFields(fields)
     : editedPromptText;
+  const productionNoteRanges = fieldSchemaValid
+    ? [
+        ...productionNoteSourceRanges(
+          fields,
+          unboundResolvedTemplate.promptFields,
+          cleanText(item?.productionNotes),
+        ),
+        ...productionNoteSourceRanges(
+          fields,
+          productionNoteBindingSourceFields,
+          cleanText(item?.productionNotes),
+        ),
+      ]
+    : [];
+  const productionNoteAmbiguities = fieldSchemaValid
+    ? productionNoteSourceAmbiguities(
+        fields,
+        unboundResolvedTemplate.promptFields,
+        item?.productionNotes,
+        productionNoteRanges,
+      )
+    : [];
+  const ambiguousLabels = new Set(productionNoteAmbiguities.map(({ label }) => label));
+  const analyzedPlaceholders = fieldSchemaValid
+    ? analyzeAgentPromptFields(fields, { ignoredSourceRanges: productionNoteRanges })
+    : null;
+  const agentPlaceholderAnalysis = analyzedPlaceholders
+    ? {
+        ...analyzedPlaceholders,
+        valid: analyzedPlaceholders.valid && productionNoteAmbiguities.length === 0,
+        items: analyzedPlaceholders.items.filter(({ field }) => !ambiguousLabels.has(field)),
+        errors: [
+          ...productionNoteAmbiguities.map(({ error }) => error),
+          ...analyzedPlaceholders.errors,
+        ],
+      }
+    : {
+        version: AGENT_PLACEHOLDER_CONTRACT_VERSION,
+        valid: true,
+        items: [],
+        errors: [],
+      };
   const customPlaceholderReady =
     defaultRoute.status === "placeholder" &&
     overrideApplied &&
@@ -1139,15 +1407,17 @@ export const makeBuiltinPromptSpec = (definition, batch, item) => {
     ? "missing_reference"
     : insufficientUnificationImages
       ? "insufficient_reference_images"
-    : !fieldSchemaValid
-      ? "invalid_field_schema"
-      : customFieldsRequired
-        ? "custom_fields_required"
-    : !promptText
-      ? "empty_prompt"
-      : defaultRoute.status === "placeholder" && !customPlaceholderReady
-        ? "placeholder"
-        : "configured";
+      : !fieldSchemaValid
+        ? "invalid_field_schema"
+        : !agentPlaceholderAnalysis.valid
+          ? "invalid_agent_placeholder"
+          : customFieldsRequired
+            ? "custom_fields_required"
+            : !promptText
+              ? "empty_prompt"
+              : defaultRoute.status === "placeholder" && !customPlaceholderReady
+                ? "placeholder"
+                : "configured";
   return {
     styleId,
     sheetName,
@@ -1158,18 +1428,25 @@ export const makeBuiltinPromptSpec = (definition, batch, item) => {
       ? "该路由必须添加至少一张参考图片。"
       : insufficientUnificationImages
         ? "视觉风格统一至少需要两张图片：图像 1 为主风格基准，图像 2～N 为待统一素材。"
-      : !fieldSchemaValid
-        ? `字段名称和顺序必须固定为：${route.promptFields
+        : !fieldSchemaValid
+          ? `字段名称和数量必须完整，当前应包含：${route.promptFields
             .map((field) => normalizePromptText(field.label))
-            .join(" → ")}`
-      : customFieldsRequired
-        ? "已选择自定义参考图用途；请填写 Input images 和 Primary request，并删除模板中的中文提示。"
-      : customPlaceholderReady
-        ? "使用本批次编辑后的自定义提示词。"
-        : normalizePromptText(defaultRoute.message),
+            .concat(customFieldLabels)
+            .join("、")}`
+          : !agentPlaceholderAnalysis.valid
+            ? agentPlaceholderAnalysis.errors[0]
+            : customFieldsRequired
+              ? "已选择自定义参考图用途；请填写 Input images 和 Primary request，并删除模板中的中文提示。"
+              : customPlaceholderReady
+                ? "使用本批次编辑后的自定义提示词。"
+                : normalizePromptText(defaultRoute.message),
     referencePolicy: defaultRoute.referencePolicy,
     promptText,
     fields,
+    agentPlaceholderContract: {
+      version: agentPlaceholderAnalysis.version,
+      items: agentPlaceholderAnalysis.items,
+    },
     referenceImages,
     ...(hasConditionResolution
       ? {

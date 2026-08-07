@@ -99,6 +99,32 @@ const runSplit = async (baseUrl, projectId) => {
   assert.fail('split task did not finish in 30 seconds');
 };
 
+test('stage timing API persists readable elapsed seconds inside the selected project Cache', async (context) => {
+  const softwareRoot = await makeRoot();
+  context.after(() => rm(softwareRoot, { recursive: true, force: true }));
+  const baseUrl = await startSoftwareServer(softwareRoot, context);
+  const project = await createProject(baseUrl, '计时项目');
+
+  const initial = await jsonRequest(`${baseUrl}/api/projects/${project.projectId}/stage-timings`);
+  assert.deepEqual(initial.body.data, { version: 1, projectId: project.projectId, stages: {} });
+  const saved = await jsonRequest(`${baseUrl}/api/projects/${project.projectId}/stage-timings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ stages: { analysis: 5673, 'world-overview': 473 } })
+  });
+  assert.equal(saved.response.status, 200);
+  assert.deepEqual(saved.body.data.stages, { analysis: 5673, 'world-overview': 473 });
+  const projectFile = path.join(
+    softwareRoot, 'workspace', 'projects', project.projectId, 'cache', '阶段用时.json'
+  );
+  assert.deepEqual(JSON.parse(await readFile(projectFile, 'utf8')).stages, {
+    analysis: 5673,
+    'world-overview': 473
+  });
+  const restored = await jsonRequest(`${baseUrl}/api/projects/${project.projectId}/stage-timings`);
+  assert.deepEqual(restored.body.data.stages, { analysis: 5673, 'world-overview': 473 });
+});
+
 test('software mode creates isolated projects, imports scripts, runs real split, and leaves package sources unchanged', async (context) => {
   const softwareRoot = await makeRoot();
   context.after(() => rm(softwareRoot, { recursive: true, force: true }));
@@ -118,6 +144,17 @@ test('software mode creates isolated projects, imports scripts, runs real split,
   await Promise.all([
     uploadText(baseUrl, alpha.projectId, '甲剧本.txt', '第一集 起点\n甲项目内容\n第二集 继续\n甲项目第二集\n'),
     uploadText(baseUrl, beta.projectId, '乙剧本.txt', '第一集 起点\n乙项目独有内容\n')
+  ]);
+  const alphaTiming = await jsonRequest(`${baseUrl}/api/projects/${alpha.projectId}/stage-timings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ stages: { split: 1 } })
+  });
+  assert.equal(alphaTiming.response.status, 200);
+  const alphaCacheRoot = path.join(softwareRoot, 'workspace', 'projects', alpha.projectId, 'cache');
+  await Promise.all([
+    writeFile(path.join(alphaCacheRoot, '阶段用时.json.tmp-regression'), '{"temporary":true}\n', 'utf8'),
+    writeFile(path.join(alphaCacheRoot, '阶段用时.json.backup-regression'), '{"backup":true}\n', 'utf8')
   ]);
 
   const [alphaTask, betaTask] = await Promise.all([

@@ -75,11 +75,13 @@ export const resultSchema = (action, episode = null) => ({
     action: { type: 'string', enum: [action] },
     summary: { type: 'string', minLength: 1, maxLength: 240 },
     processedCount: { type: 'integer', minimum: 0, maximum: action === 'classify-prompt-branches' ? 50000 : 10000 },
-    ...(action === 'analyze-screenplay' ? { analysis: analysisSchema(episode) } : {})
+    ...(action === 'analyze-screenplay' ? { analysis: analysisSchema(episode) } : {}),
+    ...(action === 'build-world-overview' ? { worldOverview: NON_EMPTY_TEXT_SCHEMA } : {})
   },
   required: [
     'completed', 'action', 'summary', 'processedCount',
-    ...(action === 'analyze-screenplay' ? ['analysis'] : [])
+    ...(action === 'analyze-screenplay' ? ['analysis'] : []),
+    ...(action === 'build-world-overview' ? ['worldOverview'] : [])
   ],
   additionalProperties: false
 });

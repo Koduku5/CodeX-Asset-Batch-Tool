@@ -51,6 +51,10 @@ DOWNSTREAM_PATHS = (
     Path("cache/出图进度.json"),
     Path("输出/剧本资产制表.xlsx"),
 )
+EMPTY_DOWNSTREAM_PLACEHOLDERS = {
+    Path("cache/出图队列.json"): {"version": 4, "items": []},
+    Path("cache/出图进度.json"): {"version": 3, "items": {}},
+}
 LEDGER_PATH = Path("cache/资产编号沿革.json")
 
 
@@ -132,7 +136,19 @@ def load_progress(cache: Path) -> tuple[set[int], list[int]]:
 
 
 def assert_no_downstream_artifacts(root: Path) -> None:
-    existing = [path.as_posix() for relative in DOWNSTREAM_PATHS if (path := root / relative).exists()]
+    existing = []
+    for relative in DOWNSTREAM_PATHS:
+        path = root / relative
+        if not path.exists():
+            continue
+        placeholder = EMPTY_DOWNSTREAM_PLACEHOLDERS.get(relative)
+        if placeholder is not None:
+            try:
+                if json.loads(path.read_text(encoding="utf-8-sig")) == placeholder:
+                    continue
+            except (OSError, json.JSONDecodeError):
+                pass
+        existing.append(path.as_posix())
     if existing:
         fail("已经建立依赖资产 ID 的下游产物，禁止自动整理编号：" + "、".join(existing))
 

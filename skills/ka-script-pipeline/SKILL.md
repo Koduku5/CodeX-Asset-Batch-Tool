@@ -20,8 +20,8 @@ description: 在 KA Asset Batch 独立项目中处理 Word/TXT 剧本，执行�
 - 剧本切分只运行固定 Python 脚本，不启动 Agent，不读取任何 reference。
 - 单集分析转交给独立的 [ka-episode-asset-analysis](../ka-episode-asset-analysis/SKILL.md)；单集 Agent 只完整读取该 Skill，不读取本 Skill、其他 reference、拆分/累计脚本、全剧总览、Excel 或出图规则。
 - 单集分析写入、累计合并、资产 ID 分配和完成标记只运行固定脚本，不启动第二个 Agent；名称或别名身份冲突由同步脚本把完整候选草稿及首次需求顺序自动暂存到 `cache/待确认记录.json`，当前集仍正常完成。单集阶段的 `productionNotes`、`inferenceBasis` 保持 `null`，不得提前反推视觉规格。
-- 全部单集完成后，世界观总览动作才读取 [worldbuilding-analysis.md](../../engine/references/worldbuilding-analysis.md) 中的全剧综合规则；若仍有待确认项，流水线在视觉规格与制表前进入安全等待。人工在软件窗口逐项选择独立建档、合并已有或排除；固定脚本在最后一项决定后一次性正式纳入、更新结构化引用、紧凑整理资产 ID 并写入编号沿革账本，不重新调用模型。随后软件自动续跑固定视觉规格动作：本地脚本每次只提取一个累计资产的事实字段与最终世界观正文，SDK 只返回 `productionNotes`、`inferenceBasis`，脚本校验资产 ID 后原子回填并记录进度。
-- 处理条件分支与队列前才读取 [prompt-catalog-architecture.md](../../engine/references/prompt-catalog-architecture.md)。
+- 全部单集完成后，世界观总览动作才读取 [worldbuilding-analysis.md](references/worldbuilding-analysis.md) 中的全剧综合规则；若仍有待确认项，流水线在视觉规格与制表前进入安全等待。人工在软件窗口逐项选择独立建档、合并已有或排除；固定脚本在最后一项决定后一次性正式纳入、更新结构化引用、紧凑整理资产 ID 并写入编号沿革账本，不重新调用模型。随后软件自动续跑固定视觉规格动作：本地脚本每次只提取一个累计资产的事实字段与最终世界观正文，SDK 只返回 `productionNotes`、`inferenceBasis`，脚本校验资产 ID 后原子回填并记录进度。
+- 处理条件分支与队列前才读取 [prompt-catalog-architecture.md](references/prompt-catalog-architecture.md)。
 
 ## 流水线
 

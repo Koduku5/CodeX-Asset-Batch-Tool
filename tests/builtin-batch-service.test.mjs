@@ -101,4 +101,28 @@ test('builtin batch configuration rejects cross-style references, weak visual un
 
   const unknown = { ...makeRequest(), arbitraryCommand: 'rm -rf' };
   await expectCode(unknown, 'INVALID_BATCH_REQUEST');
+
+  const duplicateCustomFields = makeRequest();
+  duplicateCustomFields.promptOverridesBySheet['场景'] = {
+    routeMode: 'default',
+    promptText: 'Asset type: 场景\nCamera language: 广角',
+    customFieldLabels: ['Camera language', 'camera language']
+  };
+  await expectCode(duplicateCustomFields, 'INVALID_PROMPT_OVERRIDE');
+});
+
+test('builtin batch configuration preserves validated custom prompt fields', async (t) => {
+  const fixture = await makeFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const request = makeRequest();
+  request.promptOverridesBySheet['场景'] = {
+    routeMode: 'default',
+    promptText: 'Asset type: 场景\nCamera language: 85mm telephoto',
+    customFieldLabels: ['Camera language']
+  };
+
+  await fixture.service.savePreset({ projectId: 'project-a', configuration: request });
+  const preset = JSON.parse(await readFile(join(fixture.projects.get('project-a'), 'cache', '内置提示词预设.json'), 'utf8'));
+  assert.deepEqual(preset.promptOverridesBySheet['场景'].customFieldLabels, ['Camera language']);
+  assert.match(preset.promptOverridesBySheet['场景'].promptText, /Camera language: 85mm telephoto/u);
 });

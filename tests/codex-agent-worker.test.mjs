@@ -10,6 +10,7 @@ import {
   CODEX_AGENT_ACTIONS,
   CodexAgentWorkerError,
   readCodexModelLabel,
+  reconcileAnalysisAssetIdentities,
   runCodexAgentAction,
   sanitizeAgentText,
   SOFTWARE_EPISODE_ASSET_SKILL_PATH,
@@ -100,7 +101,8 @@ const standardEvents = async function* (
         action,
         summary: completed ? '正式状态已落盘' : '正式校验未通过',
         processedCount: 1,
-        ...(action === 'analyze-screenplay' ? { analysis } : {})
+        ...(action === 'analyze-screenplay' ? { analysis } : {}),
+        ...(action === 'build-world-overview' ? { worldOverview: '统一的完整世界观总览正文' } : {})
       })
     }
   };
@@ -126,7 +128,8 @@ const analysisProgressSequence = (...states) => {
 
 const analysisRuntime = (calls = []) => ({
   prepareAnalysisEpisode: async (input) => { calls.push(['prepare', input.episode, input.resume]); },
-  commitAnalysisEpisode: async (input) => { calls.push(['commit', input.episode, input.analysis]); }
+  commitAnalysisEpisode: async (input) => { calls.push(['commit', input.episode, input.analysis]); },
+  commitWorldOverview: async () => {}
 });
 
 test('fixed episode writer binds source to the active episode snapshot before atomic write', async (context) => {
@@ -653,6 +656,28 @@ test('analysis and overview preserve their sandboxes while applying the selected
   );
 });
 
+test('world overview returns private structured content for fixed finalization', async (context) => {
+  const root = await createProject(context);
+  let outputSchema;
+  let committed;
+  const result = await runCodexAgentAction(
+    { action: 'build-world-overview', projectRoot: root },
+    {
+      createCodex: async () => ({ startThread: () => ({
+        runStreamed: async (_prompt, options) => {
+          outputSchema = options.outputSchema;
+          return { events: standardEvents('build-world-overview') };
+        }
+      }) }),
+      commitWorldOverview: async (input) => { committed = input.content; },
+      emit: () => {}, totalTimeoutMs: 1000, idleTimeoutMs: 500
+    }
+  );
+  assert.equal(outputSchema.required.includes('worldOverview'), true);
+  assert.equal(committed, '统一的完整世界观总览正文');
+  assert.equal(Object.hasOwn(result, 'worldOverview'), false);
+});
+
 test('analysis schedules one fresh SDK thread per episode and verifies each atomic commit before continuing', async (context) => {
   const root = await createProject(context);
   const calls = [];
@@ -783,6 +808,22 @@ test('analysis uses a strict nested schema and deterministically normalizes alia
   assert.equal(committed.assets.extras[0].productionNotes, null);
   assert.equal(committed.assets.extras[0].inferenceBasis, null);
   assert.deepEqual(committed.assets.extras[0].aliases, ['旧称', '另称']);
+});
+
+test('fixed worker restores immutable identity fields for an exact existing asset name', () => {
+  const analysis = episodeAnalysis(37);
+  analysis.assets.scenes = [{
+    assetName: '庆大中心食堂大厅', scriptSetting: '第 37 集补充的完整场景事实',
+    aliases: ['食堂公共区域'], firstRequiredEpisode: 37, firstRequiredOrder: 1
+  }];
+  const reconciled = reconcileAnalysisAssetIdentities(analysis, { scenes: [{
+    assetId: 'SCENE-020-EP36', assetName: '庆大中心食堂大厅',
+    firstRequiredEpisode: 36, firstRequiredOrder: 1
+  }] });
+  assert.deepEqual(reconciled.assets.scenes[0], {
+    ...analysis.assets.scenes[0], assetId: 'SCENE-020-EP36', firstRequiredEpisode: 36, firstRequiredOrder: 1
+  });
+  assert.equal(analysis.assets.scenes[0].firstRequiredEpisode, 37);
 });
 
 test('analysis rejects every nested template deviation instead of correcting it', async (context) => {

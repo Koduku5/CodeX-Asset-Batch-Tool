@@ -397,10 +397,16 @@ const validatePresetShape = (preset) => {
       || !REFERENCE_MODES.has(referenceMode)
       || (references.length === 0 && referenceMode !== 'style')
       || (referenceMode === 'visual_consistency' && references.length < 2)
-      || !exactKeys(override, ['routeMode', 'promptText'])
+      || !(exactKeys(override, ['routeMode', 'promptText']) || exactKeys(override, ['routeMode', 'promptText', 'customFieldLabels']))
       || !['default', 'reference'].includes(override.routeMode)
       || typeof override.promptText !== 'string'
       || override.promptText.length > MAX_TEXT_FIELD
+      || (override.customFieldLabels !== undefined && (
+        !Array.isArray(override.customFieldLabels)
+        || override.customFieldLabels.length > 24
+        || new Set(override.customFieldLabels.map((label) => typeof label === 'string' ? label.toLocaleLowerCase('zh-CN') : '')).size !== override.customFieldLabels.length
+        || override.customFieldLabels.some((label) => typeof label !== 'string' || !label || label !== label.trim() || label.length > 80 || /[:\r\n]/u.test(label))
+      ))
     ) {
       fail('STATE_INVALID', '内置提示词预设分类配置无效');
     }
@@ -583,7 +589,7 @@ const makeWorkerPayload = (projectId, projectRoot, builtinImagegenSkillPath) => 
   `软件级通用 Skill：${JSON.stringify(builtinImagegenSkillPath)}`,
   '你是这个软件项目唯一的长期主出图任务。先从头到尾完整读取上述软件级 ka-builtin-imagegen/SKILL.md，再严格按 worker 模式执行。项目目录不保存 Skill 副本，不得寻找或依赖项目根中的 SKILL.md。',
   '把唯一项目根作为所有正式流水线命令的根参数；每次只通过 get_next_image_job.mjs 原子领取一项，不要整体展开队列或全部提示词，不要改用队列中的 API prompt。',
-  '只使用该单项正式返回的 productionNotes、promptSpec 与 referenceImages 调用 Codex 内置 image_gen；参考图存在时按 SKILL.md 作为 referenced_image_paths 传入。',
+  '只使用该单项正式返回的 productionNotes、promptSpec 与 referenceImages 调用 Codex 内置 image_gen；只可替换 promptSpec.agentPlaceholderContract.items 明确授权的占位符，清单外字段即使为空也不得修改；参考图存在时按 SKILL.md 作为 referenced_image_paths 传入。',
   '每项完成或失败后立即按 SKILL.md 调用 update_image_progress.mjs 回写正式进度；只有落盘校验成功才可报告完成。',
   '桌面宿主、.NET bridge 和任何 SDK 都只负责建立交接，绝不能调用或模拟 image_gen，也不能预先运行领取命令、创建锁或改写进度。',
   '遇到活动锁、指纹不一致、恢复条件不明确、缺文件、项目根不可访问或工具不可用时立即失败关闭；不得删除或伪造锁，不得猜测恢复，不得输出凭据。',

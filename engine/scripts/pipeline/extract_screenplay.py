@@ -262,10 +262,16 @@ def cache_has_project_data(cache_dir: Path) -> bool:
             continue
         if path.is_relative_to(cache_dir / ".pipeline-transactions"):
             continue
-        # Prompt preferences may be saved before the first screenplay import.
-        # They are production settings, not evidence that a screenplay project
-        # has already populated this Cache.
+        # UI preferences and elapsed-time metadata may be saved before the first
+        # screenplay import. They are not evidence that a screenplay project has
+        # already populated this Cache.
         if path == cache_dir / "内置提示词预设.json":
+            continue
+        if path.parent == cache_dir and (
+            path.name == "阶段用时.json"
+            or path.name.startswith("阶段用时.json.tmp-")
+            or path.name.startswith("阶段用时.json.backup-")
+        ):
             continue
         # Folder redraw is an independent API workspace. Its blank schema and
         # completed history do not identify the screenplay currently loaded in

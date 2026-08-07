@@ -100,7 +100,9 @@ const promptSpec = makeBuiltinPromptSpec(
   item,
 );
 if (promptSpec.status !== "configured") {
-  throw new Error(`任务提示词路由尚未配置：${promptSpec.styleId}/${item.sheetName}`);
+  throw new Error(
+    `任务提示词路由尚未配置：${promptSpec.styleId}/${item.sheetName}：${promptSpec.message || promptSpec.status}`,
+  );
 }
 if (promptSpec.referencePolicy === "required" && promptSpec.referenceImages.length === 0) {
   throw new Error(`任务缺少必填参考图片：${promptSpec.styleId}/${item.sheetName}`);

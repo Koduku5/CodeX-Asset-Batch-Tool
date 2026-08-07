@@ -4,8 +4,9 @@
 
 ## 所有权边界
 
-- `engine/`：正式流水线资源。只放 `assets/`、`scripts/`、`references/`；不得放项目 Cache、输出、测试副本或桌面构建产物。
-- `skills/`：软件级公共 Skills。Skill 可以引用 `engine/references/`，但不得复制到用户项目。
+- `engine/`：正式流水线资源。只放 `assets/` 和 `scripts/`；不得放说明文档、项目 Cache、输出、测试副本或桌面构建产物。
+- `skills/`：软件级公共 Skills。运行期必须读取的补充协议放在对应 Skill 自己的 `references/`，但不得复制到用户项目。
+- `docs/reference/`：只供开发者查阅的数据结构、资产规则、提示词写法和外部 API 说明，不参与运行，也不进入桌面 sidecar。
 - `src/ui/`：React 页面。界面组件、主题、交互和布局放在这里；HTTP/native 调用统一经过 `src/ui/services/`。
 - `src/server/`：本地 API、项目隔离、任务调度和原生桥服务端。不得依赖任何仓库外固定路径。
 - `desktop/`：WPF/WebView2 宿主，只负责窗口、进程、安全令牌、剪贴板和固定系统动作。

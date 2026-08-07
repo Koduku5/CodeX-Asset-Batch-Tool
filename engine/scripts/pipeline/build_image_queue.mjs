@@ -7,6 +7,7 @@ import {
   attemptEntryFor,
   builtinPromptBatchMatchesCatalog,
   builtinPromptPresetMatchesCatalog,
+  builtinSheetIsEnabled,
   cleanText,
   getBuiltinCatalogFingerprint,
   getConditionModuleRegistryFingerprint,
@@ -417,8 +418,17 @@ try {
         item.references = references;
         item.referenceSnapshots = referenceSnapshots;
       }
-      if (conditionAssignment) {
-        makeBuiltinPromptSpec(builtinDefinition, selectedBuiltinBatch, item);
+      const shouldValidateBuiltinPrompt =
+        selectedBuiltinBatch &&
+        builtinSheetIsEnabled(selectedBuiltinBatch, item) &&
+        (!apiPromptMode || conditionAssignment);
+      if (shouldValidateBuiltinPrompt) {
+        const promptSpec = makeBuiltinPromptSpec(builtinDefinition, selectedBuiltinBatch, item);
+        if (promptSpec.status !== "configured") {
+          throw new Error(
+            `任务提示词配置无效：${item.key}：${promptSpec.message || promptSpec.status}`,
+          );
+        }
       }
       items.push(item);
     }

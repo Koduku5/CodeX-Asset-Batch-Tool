@@ -187,6 +187,7 @@ test('ready status is a bounded UI-safe summary and native handoff is read-only'
   assert.equal(handoff.includes('项目快照 ./SKILL.md'), false);
   assert.match(handoff, /每次只通过 get_next_image_job\.mjs 原子领取一项/u);
   assert.match(handoff, /Codex 内置 image_gen/u);
+  assert.match(handoff, /agentPlaceholderContract\.items.*清单外字段即使为空也不得修改/u);
   assert.match(handoff, /update_image_progress\.mjs/u);
   assert.match(handoff, /桌面宿主、\.NET bridge 和任何 SDK.*绝不能调用或模拟 image_gen/u);
   assert.equal(handoff.includes('ka-script-asset-batch安装包'), false);

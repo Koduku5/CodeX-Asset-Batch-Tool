@@ -18,6 +18,9 @@ const TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const ACTIONS = new Set(PROJECT_CONTROL_ACTIONS);
 const WORKBOOK_ASSET_TYPES = new Set(['characters', 'creatures', 'extras', 'scenes', 'props']);
 const STATUSES = new Set(['queued', 'running', 'pausing', 'succeeded', 'failed', 'paused']);
+const PIPELINE_STAGE_IDS = Object.freeze(['split', 'analysis', 'world-overview', 'asset-visual-specs', 'excel', 'generation']);
+const PIPELINE_STAGE_ID_SET = new Set(PIPELINE_STAGE_IDS);
+const MAX_STAGE_ELAPSED_SECONDS = 365 * 24 * 60 * 60;
 
 export class ProjectControlError extends Error {
   constructor(code, message, cause = null) {
@@ -126,6 +129,26 @@ const taskListDto = (value) => {
   if (!Array.isArray(value.tasks) || value.tasks.length > 2048) fail('INVALID_RESPONSE', '任务列表无效');
   return Object.freeze({ tasks: Object.freeze(value.tasks.map(taskDto)) });
 };
+const stageTimings = (value, label = 'stages') => {
+  if (!isRecord(value) || Object.keys(value).some((key) => !PIPELINE_STAGE_ID_SET.has(key))) {
+    fail('INVALID_STAGE_TIMINGS', `${label} 无效`);
+  }
+  const result = {};
+  for (const stageId of PIPELINE_STAGE_IDS) {
+    if (!Object.hasOwn(value, stageId)) continue;
+    const seconds = value[stageId];
+    if (!Number.isInteger(seconds) || seconds < 0 || seconds > MAX_STAGE_ELAPSED_SECONDS) {
+      fail('INVALID_STAGE_TIMINGS', `${label}.${stageId} 无效`);
+    }
+    result[stageId] = seconds;
+  }
+  return Object.freeze(result);
+};
+const stageTimingsDto = (value) => {
+  exactKeys(value, ['version', 'projectId', 'stages'], [], 'stageTimings');
+  if (value.version !== 1) fail('INVALID_RESPONSE', '阶段用时版本无效');
+  return Object.freeze({ version: 1, projectId: projectId(value.projectId), stages: stageTimings(value.stages) });
+};
 
 const envelopeData = (value, validator, label) => {
   exactKeys(value, ['ok', 'data'], [], `${label} envelope`);
@@ -215,6 +238,39 @@ export class ProjectControlAdapter {
       return result;
     } catch (error) {
       throw asTransportError(error, 'DELETE_PROJECT_FAILED', '删除项目失败');
+    }
+  }
+
+  async getStageTimings({ projectId: requestedProjectId }) {
+    const id = projectId(requestedProjectId);
+    try {
+      const result = await this.requestJson(
+        `/api/projects/${encodeURIComponent(id)}/stage-timings`,
+        { method: 'GET' },
+        stageTimingsDto,
+        'getStageTimings'
+      );
+      if (result.projectId !== id) fail('PROJECT_MISMATCH', '阶段用时不属于请求项目');
+      return result;
+    } catch (error) {
+      throw asTransportError(error, 'GET_STAGE_TIMINGS_FAILED', '读取阶段用时失败');
+    }
+  }
+
+  async saveStageTimings({ projectId: requestedProjectId, stages }) {
+    const id = projectId(requestedProjectId);
+    const normalizedStages = stageTimings(stages, '阶段用时');
+    try {
+      const result = await this.requestJson(
+        `/api/projects/${encodeURIComponent(id)}/stage-timings`,
+        { method: 'PUT', body: JSON.stringify({ stages: normalizedStages }) },
+        stageTimingsDto,
+        'saveStageTimings'
+      );
+      if (result.projectId !== id) fail('PROJECT_MISMATCH', '阶段用时保存到了其他项目');
+      return result;
+    } catch (error) {
+      throw asTransportError(error, 'SAVE_STAGE_TIMINGS_FAILED', '保存阶段用时失败');
     }
   }
 

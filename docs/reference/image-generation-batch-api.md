@@ -705,9 +705,9 @@ image_upload_save_failed
 不勾选批量重绘时，现有普通 API 出图逻辑保持不变：
 
 1. API 窗口显示角色、生物、群演、场景、道具五类模板，生物固定放在角色后。
-2. [`scripts/pipeline/build_image_queue.mjs`](../scripts/pipeline/build_image_queue.mjs) 读取 `输出/剧本资产制表.xlsx`，按“对应模板 + 空行 + Excel 制作说明”生成每项最终 Prompt。
+2. [`scripts/pipeline/build_image_queue.mjs`](../../engine/scripts/pipeline/build_image_queue.mjs) 读取 `输出/剧本资产制表.xlsx`，按“对应模板 + 空行 + Excel 制作说明”生成每项最终 Prompt。
 3. 任务写入 `cache/出图队列.json`，远端与下载状态写入 `cache/出图进度.json`。
-4. [`scripts/pipeline/batch_generate_images.py`](../scripts/pipeline/batch_generate_images.py) 登录、有限并发提交、轮询、校验并原子保存 PNG；整批完成后按现有协议合并画布节点。
+4. [`scripts/pipeline/batch_generate_images.py`](../../engine/scripts/pipeline/batch_generate_images.py) 登录、有限并发提交、轮询、校验并原子保存 PNG；整批完成后按现有协议合并画布节点。
 
 普通出图与旧 `reference_redraw` 恢复任务都禁止覆盖未被当前状态绑定的目标文件。新远端提交要求目标不存在并保存缺失基线；下载完成后先持久化候选文件的大小和 SHA-256，再以“不替换已有路径”的方式发布。进程若在发布与状态提交之间中断，只有目标内容与该候选指纹完全一致时才能自动认领；旧状态缺少候选证据或用户在期间放入了文件时停止恢复，不猜测文件归属。
 
@@ -728,7 +728,7 @@ image_upload_save_failed
 用户输入的本批次统一重绘提示词 -> prompt
 ```
 
-目录建队由 [`scripts/pipeline/build_directory_redraw_queue.mjs`](../scripts/pipeline/build_directory_redraw_queue.mjs) 完成。原图、结果目录与 Skill 项目必须完全分离，三者不能相同、互相嵌套或包含彼此；这样重置 Skill 输出时不会误处理用户的外部目录。脚本递归扫描并支持 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp`，不跟随符号链接或目录联接；空文件、结构与扩展名不符、声明画布超过 24 Mi 像素、无法稳定读取或超过 20 MiB 的图片写入 `skipped`。扫描硬上限为 100,000 个目录条目、10,000 张有效图片、50 GiB 有效源图总量；超过即要求拆分批次。有效任务达到 100 张时，窗口必须在启动远端 API 前二次确认费用和时长。没有有效图片时停止且不建立空队列。
+目录建队由 [`scripts/pipeline/build_directory_redraw_queue.mjs`](../../engine/scripts/pipeline/build_directory_redraw_queue.mjs) 完成。原图、结果目录与 Skill 项目必须完全分离，三者不能相同、互相嵌套或包含彼此；这样重置 Skill 输出时不会误处理用户的外部目录。脚本递归扫描并支持 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp`，不跟随符号链接或目录联接；空文件、结构与扩展名不符、声明画布超过 24 Mi 像素、无法稳定读取或超过 20 MiB 的图片写入 `skipped`。扫描硬上限为 100,000 个目录条目、10,000 张有效图片、50 GiB 有效源图总量；超过即要求拆分批次。有效任务达到 100 张时，窗口必须在启动远端 API 前二次确认费用和时长。没有有效图片时停止且不建立空队列。
 
 原图目录和结果目录必须是已存在的绝对目录，不能是盘符根、UNC 共享根，不能相同或互为上下级。队列保存每张原图的相对路径、大小、SHA-256、对应相对输出路径、统一 Prompt 和输入指纹。输出保留原图的相对子目录结构并统一保存为 PNG；不同扩展名转换后产生同名目标时停止。新批次发现结果目录中已存在同名目标时停止，禁止覆盖用户文件。该模式不会自动读取或写入 Skill 的 `输出/`；生成结果只写到用户明确选择的结果目录。
 

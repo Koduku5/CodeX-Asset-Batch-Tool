@@ -39,6 +39,7 @@ ASSET_ID_PREFIXES = {
     "props": "PROP",
 }
 ASSET_ID_RE = re.compile(r"^(CHAR|CREATURE|CROWD|SCENE|PROP)-(\d{3,})-EP([1-9]\d*)$")
+SHAPE_SUFFIX_RE = re.compile(r"\s*[（(][^）)]*[）)]\s*$")
 FACTION_CATEGORIES = {"characters", "creatures", "extras"}
 REQUIRED_ASSET_FIELDS = {
     "assetName",
@@ -76,6 +77,30 @@ def clean_text(value: object) -> str:
 
 def normalize(value: str) -> str:
     return re.sub(r"\s+", "", value).casefold()
+
+
+def subject_name(asset_name: str) -> str:
+    return SHAPE_SUFFIX_RE.sub("", clean_text(asset_name)).strip()
+
+
+def same_subject_form_family(
+    left: dict[str, object], right: dict[str, object]
+) -> bool:
+    """Return whether two distinct asset names are explicit forms of one subject."""
+    left_name = clean_text(left.get("assetName"))
+    right_name = clean_text(right.get("assetName"))
+    if not left_name or not right_name or normalize(left_name) == normalize(right_name):
+        return False
+    left_subject = subject_name(left_name)
+    right_subject = subject_name(right_name)
+    if not left_subject or normalize(left_subject) != normalize(right_subject):
+        return False
+    return left_subject != left_name or right_subject != right_name
+
+
+def has_explicit_form_name(asset_name: str) -> bool:
+    name = clean_text(asset_name)
+    return bool(name) and subject_name(name) != name
 
 
 def validate_aliases(value: object, location: str, asset_name: str) -> list[str]:
@@ -250,6 +275,15 @@ def defer_identity_conflicts(
         name = clean_text(record.get("assetName"))
         own_tokens = {token: value for token, value in identity_values(record)}
         conflicts: list[dict[str, object]] = []
+        supplied_id = clean_text(record.get("assetId"))
+        updates_existing = any(
+            peer_category == category
+            and (
+                clean_text(peer.get("assetName")) == name
+                or (supplied_id and clean_text(peer.get("assetId")) == supplied_id)
+            )
+            for peer_category, peer in all_existing
+        )
         peers = [*all_existing, *all_incoming]
         for peer_category, peer in peers:
             if peer is record or identity_group(peer_category) != identity_group(category):
@@ -257,8 +291,32 @@ def defer_identity_conflicts(
             peer_name = clean_text(peer.get("assetName"))
             if peer_category == category and peer_name == name:
                 continue
+            # A new bare subject name beside existing explicit forms is ambiguous:
+            # it may be an accidental duplicate or a genuinely new default form.
+            # Keep legal named forms automatic, but send this asymmetric case to
+            # the existing human confirmation checkpoint before assigning an ID.
+            if (
+                not updates_existing
+                and not has_explicit_form_name(name)
+                and has_explicit_form_name(peer_name)
+                and normalize(subject_name(peer_name)) == normalize(name)
+            ):
+                conflict = {
+                    "category": peer_category,
+                    "assetId": clean_text(peer.get("assetId")) or None,
+                    "assetName": peer_name,
+                    "sharedValue": name,
+                }
+                if conflict not in conflicts:
+                    conflicts.append(conflict)
+                continue
             for peer_token, peer_value in identity_values(peer):
                 if peer_token not in own_tokens:
+                    continue
+                # Distinct, explicitly named forms of one subject are expected to
+                # share the subject's canonical name and dialogue aliases.  That is
+                # a one-to-many lookup key, not an unresolved identity collision.
+                if same_subject_form_family(record, peer):
                     continue
                 conflict = {
                     "category": peer_category,
@@ -349,9 +407,9 @@ def defer_identity_conflicts(
 
 
 def ensure_no_exact_identity_conflicts(records: dict[str, list[dict[str, object]]]) -> None:
-    """既有资产可有同主体的多个形态，但名称与别名仍不得互相占用。"""
+    """Reject ambiguous identities while allowing one subject's explicit forms."""
     for label, group in category_groups(records):
-        owners: dict[str, str] = {}
+        owners: dict[str, dict[str, object]] = {}
         for record in group:
             name = clean_text(record.get("assetName"))
             aliases = record.get("aliases", [])
@@ -362,12 +420,13 @@ def ensure_no_exact_identity_conflicts(records: dict[str, list[dict[str, object]
                     continue
                 token = normalize(text)
                 prior = owners.get(token)
-                if prior is not None:
+                if prior is not None and not same_subject_form_family(record, prior):
+                    prior_name = clean_text(prior.get("assetName"))
                     fail(
-                        f"{label}名称/别名冲突：“{name}”与“{prior}”共享称呼“{text}”。"
+                        f"{label}名称/别名冲突：“{name}”与“{prior_name}”共享称呼“{text}”。"
                         "脚本不会自动判断归并，请由 Agent 写入待确认记录。"
                     )
-                owners[token] = name
+                owners[token] = record
 
 
 def merge_by_name(

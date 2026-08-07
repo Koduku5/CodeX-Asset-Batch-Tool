@@ -14,6 +14,15 @@ const REFERENCE_MODE_MAP = Object.freeze({
 });
 const STYLE_SET = new Set(STYLE_IDS);
 const SHEET_SET = new Set(SHEET_NAMES);
+const CORE_PROMPT_FIELD_LABELS = new Set([
+  'Use case', 'Input images', 'Asset type', 'Primary request', 'Scene/backdrop',
+  'Style/medium', 'Composition/framing', 'Lighting/mood', 'Color/tonality',
+  'Materials/textures', 'Constraints', 'Avoid'
+]);
+const NORMALIZED_CORE_PROMPT_FIELD_LABELS = new Set(
+  [...CORE_PROMPT_FIELD_LABELS].map((label) => label.toLocaleLowerCase('zh-CN'))
+);
+const MAX_CUSTOM_PROMPT_FIELDS = 24;
 
 export class BuiltinBatchServiceError extends Error {
   constructor(code, message, { status = 400, cause = null } = {}) {
@@ -30,6 +39,25 @@ const fail = (code, message, options) => {
 
 const exactKeys = (value, expected) => value && typeof value === 'object' && !Array.isArray(value)
   && Object.keys(value).sort().join('\0') === [...expected].sort().join('\0');
+
+const hasPromptOverrideKeys = (value) => exactKeys(value, ['routeMode', 'promptText'])
+  || exactKeys(value, ['routeMode', 'promptText', 'customFieldLabels']);
+
+const normalizeCustomFieldLabels = (value, sheetName) => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_CUSTOM_PROMPT_FIELDS) {
+    fail('INVALID_PROMPT_OVERRIDE', `${sheetName} 的自定义提示词字段无效`);
+  }
+  const labels = value.map((label) => typeof label === 'string' ? label.trim() : '');
+  const normalized = labels.map((label) => label.toLocaleLowerCase('zh-CN'));
+  if (
+    labels.some((label, index) => !label || label !== value[index] || label.length > 80 || /[:\r\n]/u.test(label) || NORMALIZED_CORE_PROMPT_FIELD_LABELS.has(normalized[index]))
+    || new Set(normalized).size !== labels.length
+  ) {
+    fail('INVALID_PROMPT_OVERRIDE', `${sheetName} 的自定义提示词字段名称无效或重复`);
+  }
+  return labels;
+};
 
 const isInside = (root, target, { allowRoot = false } = {}) => {
   const offset = relative(root, target);
@@ -98,10 +126,15 @@ const normalizeRequest = (value) => {
     if (override === null) {
       promptOverridesBySheet[sheetName] = null;
     } else {
-      if (!exactKeys(override, ['routeMode', 'promptText']) || !['default', 'reference'].includes(override.routeMode) || typeof override.promptText !== 'string' || override.promptText.length > 128 * 1024) {
+      if (!hasPromptOverrideKeys(override) || !['default', 'reference'].includes(override.routeMode) || typeof override.promptText !== 'string' || override.promptText.length > 128 * 1024) {
         fail('INVALID_PROMPT_OVERRIDE', `${sheetName} 的提示词覆盖无效`);
       }
-      promptOverridesBySheet[sheetName] = { routeMode: override.routeMode, promptText: override.promptText };
+      const customFieldLabels = normalizeCustomFieldLabels(override.customFieldLabels, sheetName);
+      promptOverridesBySheet[sheetName] = {
+        routeMode: override.routeMode,
+        promptText: override.promptText,
+        ...(customFieldLabels.length ? { customFieldLabels } : {})
+      };
     }
   }
   return {

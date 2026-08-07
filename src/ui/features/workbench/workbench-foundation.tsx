@@ -1,77 +1,18 @@
 import * as React from "react"
 import {
-  Activity,
-  AlertTriangle,
   Bot,
-  Boxes,
   Check,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronDown,
-  ChevronRight,
-  ClipboardCopy,
-  CloudCog,
-  Copy,
-  Database,
-  Download,
-  Eye,
-  EyeOff,
-  FileOutput,
-  FileText,
-  FolderOpen,
-  ImagePlus,
-  Layers3,
   LoaderCircle,
-  Moon,
-  MoreHorizontal,
-  Network,
   PackageOpen,
-  PanelRightOpen,
-  Pause,
-  Pencil,
   Play,
   Plus,
-  RefreshCw,
-  Route,
-  Save,
   Send,
-  Sparkles,
   Square,
-  Sun,
-  TestTube2,
-  Timer,
-  Trash2,
-  Upload,
-  WandSparkles,
-  X,
 } from "lucide-react"
 
-import { useTheme } from "@/components/theme-provider"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
@@ -80,92 +21,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { PromptFieldList } from "@/features/prompt-studio/prompt-field-list"
-import {
-  readLegacyTemplateDrafts,
-  readTemplateDraft,
-  templateDraftRecords,
-  withTemplateDraft,
-} from "@/features/prompt-studio/template-drafts.mjs"
-import { PendingAssetDialog } from "@/features/pending-assets/pending-asset-dialog"
+import { readLegacyTemplateDrafts } from "@/features/prompt-studio/template-drafts.mjs"
 
 import { BatchControlAdapter } from "@/services/batch-control-adapter.mjs"
-import {
-  CatalogResolverAdapter,
-  formatPromptText,
-  makeRouteTrace,
-} from "@/services/catalog-adapter.mjs"
+import { CatalogResolverAdapter } from "@/services/catalog-adapter.mjs"
 import { ImagegenHandoffAdapter } from "@/services/imagegen-handoff-adapter.mjs"
-import { paginateAssets } from "@/services/list-model.mjs"
 import { ProjectControlAdapter } from "@/services/project-control-adapter.mjs"
 import { ProjectWorkspaceAdapter } from "@/services/project-workspace.mjs"
 import { CodexStatusAdapter } from "@/services/codex-status-adapter.mjs"
 import { CodexAgentChatAdapter } from "@/services/codex-agent-chat-adapter.mjs"
 import {
-  DEFAULT_ALLOWED_TARGET_FIELDS,
-  DEFAULT_CONTROL_DIMENSIONS,
   RouteModuleAdminAdapter,
   RouteClassifierAdapter,
-  applyModuleOperationsPreview,
-  buildClassificationRequest,
-  createRouteBranchFile,
-  createRoutePresetPackage,
   normalizeRouteModule,
-  parseRouteExchangeArtifact,
   routeModulesEqual,
-  validateRouteModule,
 } from "@/services/route-module-workbench.mjs"
 
-declare global {
-  interface Window {
-    kaDesktopBridge?: {
-      setStudioDrawerOpen?: (input: { open: boolean; width?: number }) => Promise<JsonRecord>
-      openProjectDirectory?: (input: { projectId: string; kind: "project" | "output" }) => Promise<unknown>
-      openApiBatchSettings?: (input: {
-        projectId: string
-        baseUrl: string
-        username: string
-        password: string
-        maxWorkers: number
-        aspectRatio: string
-        imageSize: string
-      }) => Promise<JsonRecord>
-      loadApiCatalog?: (input: {
-        projectId: string
-        baseUrl: string
-        username: string
-        password: string
-      }) => Promise<JsonRecord>
-      selectApiDirectory?: (input: { purpose: "source" | "output" }) => Promise<JsonRecord>
-      startApiBatch?: (input: {
-        projectId: string
-        baseUrl: string
-        username: string
-        password: string
-        remoteProjectId: string
-        modelId: string
-        maxWorkers: number
-        aspectRatio: string
-        imageSize: string
-        operation: "generate" | "directory_redraw"
-        promptTemplates?: Record<string, string>
-        sourceSelectionToken?: string
-        outputSelectionToken?: string
-        redrawPrompt?: string
-      }) => Promise<JsonRecord>
-      prepareBuiltinImagegen?: (input: { projectId: string }) => Promise<unknown>
-      authorizeCodex?: () => Promise<JsonRecord>
-      saveJsonFile?: (input: { suggestedName: string; jsonText: string }) => Promise<JsonRecord>
-      selectProject?: (input: { projectId: string; expectedRevision: number }) => Promise<unknown>
-    }
-  }
-}
 export type JsonRecord = Record<string, any>
 export type ProjectCard = {
   projectId: string

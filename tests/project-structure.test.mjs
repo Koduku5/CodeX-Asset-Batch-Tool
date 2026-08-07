@@ -12,7 +12,9 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
   for (const relativePath of [
     'engine/assets',
     'engine/scripts',
-    'engine/references',
+    'docs/reference',
+    'skills/ka-script-pipeline/references',
+    'skills/ka-builtin-imagegen/references',
     'skills/ka-script-pipeline/SKILL.md',
     'skills/ka-episode-asset-analysis/SKILL.md',
     'skills/ka-episode-asset-analysis/agents/openai.yaml',
@@ -46,6 +48,7 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'engine/scripts/commands/reset_cache.ps1',
     'engine/scripts/commands/show_pipeline_progress.mjs',
     'engine/references/builtin-prompt-ui.md',
+    'engine/references',
     'docs/legacy/ka-script-asset-batch-skill.md'
   ]) {
     await assert.rejects(access(path.join(root, legacyStandaloneEntry)), { code: 'ENOENT' });

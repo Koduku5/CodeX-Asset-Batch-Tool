@@ -32,7 +32,7 @@ description: 在 Codex App 中调度或执行 KA Asset Batch 的内置 ImageGen 
 
 - `worker` 和 `retry-worker` 只接受原生 Bridge 校验后交付的一个项目根。剧本、`cache`、`输出`、队列和锁均必须在该项目内。
 - 队列未建立、内置批次未确认、指纹过期或其他后端正在运行时，立即停止，不自动修改队列。
-- 完整读取 [asset-type-rules.md](../../engine/references/asset-type-rules.md) 和 [builtin-prompt-field-contract.md](../../engine/references/builtin-prompt-field-contract.md) 一次。
+- 完整读取 [asset-type-rules.md](references/asset-type-rules.md) 和 [builtin-prompt-field-contract.md](references/builtin-prompt-field-contract.md) 一次。
 - 不整体加载队列，不一次读取全部 Prompt，不提前 claim 下一项。
 
 ## 单项循环
@@ -43,12 +43,13 @@ description: 在 Codex App 中调度或执行 KA Asset Batch 的内置 ImageGen 
 
    定向测试时只可由交付信息附加 `--only-key <精确 Key>`；恢复已领取项时只可使用 `--resume`。
 2. 领取结果 `done=true` 时停止。否则只使用返回的单项 `productionNotes`、`promptSpec`、`referenceImages`、输出路径与指纹。
-3. 以 `promptSpec.promptText` 和 `promptSpec.fields` 为用户确认后的唯一基础模板。禁止改名、新增、删除或重排字段，禁止改用队列中的 API Prompt。
-4. 依据完整制作说明和资产类型规则填充现有字段。没有原文依据的光线、颜色、材质和约束留空；不新增剧情事实。任何 `【由 Agent……】` 或判断说明占位都不得发送给 `image_gen`。
-5. 无参考图时确认 `routeMode=default`、`referenceMode=none`、11 字段且无 `Input images`。有参考图时确认 `routeMode=reference`、12 字段及参考方式，按原顺序将所有绝对路径传给 `referenced_image_paths`。
-6. 每个队列 Key 的首次生成单独调用一次内置 `image_gen`。调用成功后将有效 PNG 放到该任务的精确输出路径。
-7. 用 `scripts/pipeline/update_image_progress.mjs` 将该 Key 写为 `completed`；失败时写为 `failed` 并提供非空错误。脚本必须校验 PNG、路径、输入指纹和锁释放令牌。
-8. 一项终态回写完成后才能领取下一项。用户要求暂停时立即停止新领取。
+3. 以 `promptSpec.promptText` 和 `promptSpec.fields` 为用户确认后的唯一基础模板。`promptSpec.agentPlaceholderContract` 必须存在且 `version=1`；缺失、版本不同、条目字段不存在、同一 occurrence 对不上或 marker 与字段原文不一致时立即失败，不调用 `image_gen`。
+4. 只处理 `agentPlaceholderContract.items` 明确列出的占位符。`mode=field` 时用判断结果替换该字段的完整值；`mode=inline` 时只替换该条目的精确 marker。判断只使用该条目的 instruction、当前资产完整制作说明及允许读取的参考图；没有原文依据时替换为空，不新增剧情事实。
+5. 未列入清单的字段值全部视为用户固定内容，即使为空也不得补写、润色或重算；禁止改名、新增、删除或重排字段，禁止改用队列中的 API Prompt。完成替换后必须确认清单中的每个 marker 都已移除，且没有清单外字段发生变化；任何 Agent 占位符都不得发送给 `image_gen`。
+6. 无参考图时确认 `routeMode=default`、`referenceMode=none`、11 字段且无 `Input images`。有参考图时确认 `routeMode=reference`、12 字段及参考方式，按原顺序将所有绝对路径传给 `referenced_image_paths`。
+7. 每个队列 Key 的首次生成单独调用一次内置 `image_gen`。调用成功后将有效 PNG 放到该任务的精确输出路径。
+8. 用 `scripts/pipeline/update_image_progress.mjs` 将该 Key 写为 `completed`；失败时写为 `failed` 并提供非空错误。脚本必须校验 PNG、路径、输入指纹和锁释放令牌。
+9. 一项终态回写完成后才能领取下一项。用户要求暂停时立即停止新领取。
 
 ## 重试与新任务
 

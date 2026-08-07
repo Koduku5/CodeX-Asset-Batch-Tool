@@ -42,7 +42,12 @@ const MAX_PIPELINE_SKILL_BYTES = 1024 * 1024;
 const MAX_EPISODE_ASSET_SKILL_BYTES = 256 * 1024;
 const MAX_ANALYSIS_PROGRESS_BYTES = 4 * 1024 * 1024;
 const MAX_ANALYSIS_RESULT_BYTES = 1024 * 1024;
+const MAX_ASSET_REGISTRY_BYTES = 16 * 1024 * 1024;
 const MAX_PIPELINE_COMMAND_OUTPUT_BYTES = 64 * 1024;
+const ASSET_REGISTRY_FILES = Object.freeze({
+  characters: '角色记录.json', creatures: '生物记录.json', extras: '群演记录.json', scenes: '场景记录.json',
+  props: '道具记录.json'
+});
 const DEFAULT_NETWORK_RETRY_LIMIT = 3;
 export const SOFTWARE_PIPELINE_SKILL_PATH = fileURLToPath(
   new URL('../../skills/ka-script-pipeline/SKILL.md', import.meta.url)
@@ -137,6 +142,29 @@ const readAnalysisProgressFile = async (projectRoot) => {
     throw workerError('ANALYSIS_PROGRESS_UNAVAILABLE', '逐集分析进度不可用', error);
   }
 };
+
+const readAssetRegistries = async (projectRoot) => Object.fromEntries(await Promise.all(
+  Object.entries(ASSET_REGISTRY_FILES).map(async ([category, filename]) => {
+    const target = join(projectRoot, 'cache', '累计记录', filename);
+    try {
+      const info = await lstat(target);
+      if (!info.isFile() || info.isSymbolicLink() || info.size <= 0 || info.size > MAX_ASSET_REGISTRY_BYTES) {
+        throw new Error('unsafe asset registry file');
+      }
+      const canonical = await realpath(target);
+      if (isOutside(projectRoot, canonical)) throw new Error('asset registry escapes project root');
+      const content = await readFile(canonical, 'utf8');
+      if (Buffer.byteLength(content, 'utf8') !== info.size) throw new Error('asset registry changed while reading');
+      const records = JSON.parse(content.replace(/^\uFEFF/u, ''));
+      if (!Array.isArray(records) || records.some((record) => !record || typeof record !== 'object' || Array.isArray(record))) {
+        throw new Error('asset registry must contain record objects');
+      }
+      return [category, records];
+    } catch (error) {
+      throw workerError('ANALYSIS_ASSET_REGISTRY_UNAVAILABLE', `累计${filename}不可用`, error);
+    }
+  })
+));
 
 const normalizeEpisodeList = (value, label) => {
   if (!Array.isArray(value) || value.some((episode) => !Number.isInteger(episode) || episode <= 0)) {
@@ -422,6 +450,37 @@ const prepareAnalysisForFormalWriter = (analysis) => ({
   )
 });
 
+export const reconcileAnalysisAssetIdentities = (analysis, registries) => ({
+  ...analysis,
+  assets: Object.fromEntries(Object.keys(ASSET_REGISTRY_FILES).map((category) => {
+    const byName = new Map();
+    const byId = new Map();
+    for (const record of registries[category] ?? []) {
+      const name = typeof record.assetName === 'string' ? record.assetName.trim() : '';
+      const assetId = typeof record.assetId === 'string' ? record.assetId.trim() : '';
+      if (!name || !assetId || byName.has(name) || byId.has(assetId)) {
+        throw workerError('ANALYSIS_ASSET_REGISTRY_INVALID', `累计资产身份存在缺失或重复：${category}`);
+      }
+      byName.set(name, record);
+      byId.set(assetId, record);
+    }
+    return [category, analysis.assets[category].map((record) => {
+      const nameMatch = byName.get(String(record.assetName ?? '').trim());
+      const idMatch = byId.get(String(record.assetId ?? '').trim());
+      if (nameMatch && idMatch && nameMatch !== idMatch) {
+        throw workerError('INVALID_AGENT_RESULT', `资产名称与 ID 指向不同旧记录：${record.assetName}`);
+      }
+      const existing = idMatch ?? nameMatch;
+      if (!existing) return { ...record };
+      return {
+        ...record, assetId: existing.assetId, assetName: existing.assetName,
+        firstRequiredEpisode: existing.firstRequiredEpisode,
+        firstRequiredOrder: existing.firstRequiredOrder
+      };
+    })];
+  }))
+});
+
 const parseFinalResult = (text, action, projectRoot, episode = null) => {
   const candidate = String(text ?? '').trim().replace(/^```(?:json)?\s*|\s*```$/giu, '');
   let value;
@@ -444,7 +503,8 @@ const parseFinalResult = (text, action, projectRoot, episode = null) => {
     action,
     summary: sanitizeAgentText(value.summary, projectRoot).slice(0, 240) || '动作未提供可显示说明',
     processedCount: value.processedCount,
-    ...(analysis ? { analysis } : {})
+    ...(analysis ? { analysis } : {}),
+    ...(action === 'build-world-overview' ? { worldOverview: value.worldOverview } : {})
   });
   if (!result.completed) throw workerError('AGENT_REPORTED_INCOMPLETE', result.summary);
   return result;
@@ -535,12 +595,14 @@ const prepareAnalysisEpisodeDefault = async ({ projectRoot, episode, resume, sig
 };
 
 const commitAnalysisEpisodeDefault = async ({ projectRoot, episode, analysis, signal, onActivity, onProgress }) => {
+  const registries = await readAssetRegistries(projectRoot);
+  const reconciledAnalysis = reconcileAnalysisAssetIdentities(analysis, registries);
   await runProjectPipelineScript({
     projectRoot,
     runtime: 'python',
     script: 'write_episode_analysis.py',
     argumentsList: [String(episode)],
-    input: JSON.stringify(analysis),
+    input: JSON.stringify(reconciledAnalysis),
     signal,
     onActivity,
     label: `第 ${episode} 集分析文件写入`
@@ -585,6 +647,24 @@ const runVisualSpecScriptDefault = async ({ projectRoot, command, payload = null
   return result;
 };
 
+const commitWorldOverviewDefault = async ({ projectRoot, content, signal, onActivity, onProgress }) => {
+  const text = await runProjectPipelineScript({
+    projectRoot,
+    runtime: 'python',
+    script: 'finalize_world_overview.py',
+    argumentsList: [],
+    input: JSON.stringify({ content }),
+    signal,
+    onActivity,
+    label: '世界观总览正式提交',
+    errorCode: 'WORLD_OVERVIEW_PIPELINE_FAILED'
+  });
+  const receipt = parseAgentJson(text, '世界观总览正式脚本');
+  if (receipt?.ok !== true) throw workerError('WORLD_OVERVIEW_PIPELINE_FAILED', '世界观总览正式脚本未返回成功状态');
+  onProgress?.('世界观总览已完成正式校验');
+  return receipt;
+};
+
 const safeEventMessage = (event) => {
   if (event?.type === 'thread.started') return 'Codex Agent 新会话已建立';
   if (event?.type === 'turn.started') return 'Codex Agent 已开始执行固定动作';
@@ -627,6 +707,7 @@ export async function runCodexAgentAction(input, {
   readAnalysisProgress = readAnalysisProgressFile,
   prepareAnalysisEpisode = prepareAnalysisEpisodeDefault,
   commitAnalysisEpisode = commitAnalysisEpisodeDefault,
+  commitWorldOverview = commitWorldOverviewDefault,
   runVisualSpecScript = runVisualSpecScriptDefault,
   resolveModelLabel = readCodexModelLabel,
   emit = (line) => process.stdout.write(`${line}\n`),
@@ -639,6 +720,7 @@ export async function runCodexAgentAction(input, {
   if (typeof createCodex !== 'function' || typeof createBranchClassificationSession !== 'function'
     || typeof readAnalysisProgress !== 'function' || typeof resolveModelLabel !== 'function'
     || typeof prepareAnalysisEpisode !== 'function' || typeof commitAnalysisEpisode !== 'function'
+    || typeof commitWorldOverview !== 'function'
     || typeof runVisualSpecScript !== 'function'
     || typeof emit !== 'function') {
     throw new TypeError('worker dependencies must be functions');
@@ -1042,8 +1124,18 @@ export async function runCodexAgentAction(input, {
     });
     await verifySoftwarePipelineSkill(pipelineSkill);
     const parsed = parseFinalResult(finalMessage, request.action, projectRoot);
+    if (request.action === 'build-world-overview') {
+      await commitWorldOverview({
+        projectRoot,
+        content: parsed.worldOverview,
+        signal: controller.signal,
+        onActivity: resetIdleTimer,
+        onProgress: emitProgress
+      });
+    }
+    const { worldOverview: _privateOverview, ...publicParsed } = parsed;
     const result = Object.freeze({
-      ...parsed,
+      ...publicParsed,
       softwareSkill: publicSkillReceipt(pipelineSkill)
     });
     emit(`KA_AGENT_RESULT ${JSON.stringify(result)}`);

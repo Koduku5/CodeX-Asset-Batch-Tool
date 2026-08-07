@@ -148,6 +148,33 @@ test('HTTP fallback uses only fixed project-control routes and raw file bodies',
   assert.equal(decodeURIComponent(requests[3].init.headers['x-ka-filename']), 'script.txt');
 });
 
+test('stage timings use one strict project Cache API contract', async () => {
+  const requests = [];
+  const responses = [
+    { version: 1, projectId: 'alpha', stages: { analysis: 42 } },
+    { version: 1, projectId: 'alpha', stages: { analysis: 43, 'world-overview': 7 } }
+  ];
+  const adapter = new ProjectControlAdapter({
+    bridge: null,
+    fetchImpl: async (url, init) => {
+      requests.push({ url, init });
+      return { ok: true, json: async () => envelope(responses.shift()) };
+    }
+  });
+
+  assert.equal((await adapter.getStageTimings({ projectId: 'alpha' })).stages.analysis, 42);
+  await adapter.saveStageTimings({ projectId: 'alpha', stages: { analysis: 43, 'world-overview': 7 } });
+  assert.deepEqual(requests.map(({ url, init }) => [url, init.method]), [
+    ['/api/projects/alpha/stage-timings', 'GET'],
+    ['/api/projects/alpha/stage-timings', 'PUT']
+  ]);
+  assert.deepEqual(JSON.parse(requests[1].init.body), { stages: { analysis: 43, 'world-overview': 7 } });
+  await assert.rejects(
+    () => adapter.saveStageTimings({ projectId: 'alpha', stages: { invented: 1 } }),
+    (error) => error instanceof ProjectControlError && error.code === 'INVALID_STAGE_TIMINGS'
+  );
+});
+
 test('invalid names, files, ids, actions, oversized input, and mismatched receipts fail closed', async () => {
   const adapter = new ProjectControlAdapter({ bridge: null, fetchImpl: async () => ({ ok: true, json: async () => envelope(project) }) });
   const rejects = [

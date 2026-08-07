@@ -97,6 +97,26 @@ class PendingAssetResolutionTests(unittest.TestCase):
             value["targetAssetId"] = target
         return value
 
+    def test_empty_generation_placeholders_do_not_block_id_compaction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "cache"
+            cache.mkdir()
+            for relative, value in MODULE.EMPTY_DOWNSTREAM_PLACEHOLDERS.items():
+                path = root / relative
+                path.write_text(json.dumps(value), encoding="utf-8")
+            MODULE.assert_no_downstream_artifacts(root)
+
+    def test_nonempty_or_invalid_generation_state_still_blocks_id_compaction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "cache"
+            cache.mkdir()
+            (cache / "出图队列.json").write_text('{"version":4,"items":[{"assetId":"CHAR-001"}]}', encoding="utf-8")
+            (cache / "出图进度.json").write_text("{broken", encoding="utf-8")
+            with self.assertRaisesRegex(MODULE.UserError, "禁止自动整理编号"):
+                MODULE.assert_no_downstream_artifacts(root)
+
     def test_independent_decision_inserts_by_source_order_and_remaps_later_id(self):
         temporary, cache, assets = self.make_cache()
         self.addCleanup(temporary.cleanup)

@@ -65,6 +65,10 @@ import {
   createPendingAssetService,
   PendingAssetServiceError
 } from './pending-asset-service.mjs';
+import {
+  createStageTimingService,
+  StageTimingServiceError
+} from './stage-timing-service.mjs';
 
 const serverRoot = fileURLToPath(new URL('.', import.meta.url));
 const applicationRoot = resolve(serverRoot, '../..');
@@ -355,7 +359,8 @@ const serviceHttpError = (error) => {
   if (error instanceof ReferenceImageStoreError
     || error instanceof BuiltinBatchServiceError
     || error instanceof PromptRegistryServiceError
-    || error instanceof CodexImagegenHandoffError) {
+    || error instanceof CodexImagegenHandoffError
+    || error instanceof StageTimingServiceError) {
     return new HttpError(error.status, error.code, error.message);
   }
   return error;
@@ -709,6 +714,7 @@ export function createPrototypeServer(options = {}) {
     materializeProjectRuntime,
     withProjectIdle: taskRunner.withProjectIdle
   }) : null;
+  const stageTimingService = softwareWorkspace ? createStageTimingService({ resolveProjectRoot }) : null;
   const services = Object.freeze({
     installationRoot: resolvedInstallationRoot,
     engineRoot: resolvedEngineRoot,
@@ -724,6 +730,7 @@ export function createPrototypeServer(options = {}) {
     promptRegistryService,
     imagegenHandoffService,
     pendingAssetService,
+    stageTimingService,
     legacyWorkbenchReader,
     getProjectReader,
     ensureReady,

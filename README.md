@@ -187,7 +187,6 @@ prompt-studio-prototype/
 │  └─ PromptStudio.Desktop/
 ├─ engine/                      # 正式流水线，运行时不依赖外部安装包
 │  ├─ assets/                   # Excel 模板、Prompt Catalog、基础路由与修饰器
-│  ├─ references/               # 数据、提示词、资产和 API 契约
 │  └─ scripts/
 │     ├─ commands/              # 固定命令入口
 │     ├─ lib/                   # 原子 IO、锁、协议、安全与运行时
@@ -210,7 +209,7 @@ prompt-studio-prototype/
 │  └─ installer.iss
 ├─ tests/                       # Node、服务、UI 契约、桌面、安全、性能、打包测试
 ├─ tools/dev.mjs               # 4173 前端 + 4174 后端开发入口
-├─ docs/                        # 结构与桌面桥补充说明
+├─ docs/                        # 开发说明与不参与运行的参考文档
 ├─ package.json
 └─ vite.config.ts
 ```
@@ -413,4 +412,5 @@ npm run build:installer
 - `docs/PROJECT-STRUCTURE.md`：目录所有权与新代码放置规则。
 - `docs/DESKTOP-BRIDGE.md`：桌面令牌和 RPC 安全边界。
 - `desktop/README.md`：WPF/WebView2 生命周期与发布布局。
-- `engine/references/`：流水线、资产、Prompt 和 Infinite Canvas API 的正式契约。
+- `skills/*/references/`：对应 Skill 在运行期必须读取的补充协议。
+- `docs/reference/`：资产数据、提示词写法和 Infinite Canvas API 等开发参考，不参与运行。

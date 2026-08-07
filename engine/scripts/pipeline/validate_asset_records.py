@@ -72,12 +72,31 @@ ASSET_FIELD_ORDER = (
 )
 WORLD_FIELD_ORDER = ("item", "content")
 ALLOWED_PENDING_STATUS = {"pending", "resolved"}
+SHAPE_SUFFIX_RE = re.compile(r"\s*[（(][^）)]*[）)]\s*$")
 VALIDATION_RECEIPT_VERSION = 1
 VALIDATOR_PROTOCOL_VERSION = 5
 
 
 def normalize(value: str) -> str:
     return re.sub(r"\s+", "", value).casefold()
+
+
+def subject_name(asset_name: str) -> str:
+    return SHAPE_SUFFIX_RE.sub("", clean_text(asset_name)).strip()
+
+
+def same_subject_form_family(
+    left: dict[str, object], right: dict[str, object]
+) -> bool:
+    left_name = clean_text(left.get("assetName"))
+    right_name = clean_text(right.get("assetName"))
+    if not left_name or not right_name or normalize(left_name) == normalize(right_name):
+        return False
+    left_subject = subject_name(left_name)
+    right_subject = subject_name(right_name)
+    if not left_subject or normalize(left_subject) != normalize(right_subject):
+        return False
+    return left_subject != left_name or right_subject != right_name
 
 
 def normalize_field(value: object) -> object:
@@ -821,7 +840,7 @@ def validate_locked() -> int:
     }
     total = 0
     people_names: dict[str, str] = {}
-    identity_owners: dict[str, dict[str, str]] = {
+    identity_owners: dict[str, dict[str, dict[str, object]]] = {
         "people": {},
         "scenes": {},
         "props": {},
@@ -931,11 +950,12 @@ def validate_locked() -> int:
             for identity in [name, *aliases]:
                 key = normalize(identity)
                 prior = identity_owners[identity_group].get(key)
-                if prior and prior != name:
+                if prior and not same_subject_form_family(record, prior):
+                    prior_name = clean_text(prior.get("assetName"))
                     errors.append(
-                        f"{identity_label}名称或别名冲突：“{name}”与“{prior}”共享“{identity}”"
+                        f"{identity_label}名称或别名冲突：“{name}”与“{prior_name}”共享“{identity}”"
                     )
-                identity_owners[identity_group][key] = name
+                identity_owners[identity_group][key] = record
         ordered_sequences = [
             item[2] for item in sorted(sequence_order, key=lambda item: (item[0], item[1]))
         ]

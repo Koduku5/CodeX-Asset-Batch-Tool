@@ -2,7 +2,6 @@ import * as React from "react"
 import {
   Activity,
   AlertTriangle,
-  Bot,
   Boxes,
   Check,
   CheckCircle2,
@@ -10,35 +9,21 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardCopy,
-  CloudCog,
-  Copy,
   Database,
-  Download,
-  Eye,
-  EyeOff,
   FileOutput,
   FileText,
   FolderOpen,
-  ImagePlus,
-  Layers3,
   LoaderCircle,
   Moon,
-  MoreHorizontal,
   Network,
-  PackageOpen,
   PanelRightOpen,
   Pause,
   Pencil,
   Play,
   Plus,
   RefreshCw,
-  Route,
-  Save,
-  Send,
   Sparkles,
-  Square,
   Sun,
-  TestTube2,
   Timer,
   Trash2,
   Upload,
@@ -60,7 +45,6 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -72,176 +56,43 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { PromptFieldList } from "@/features/prompt-studio/prompt-field-list"
-import {
-  readLegacyTemplateDrafts,
-  readTemplateDraft,
-  templateDraftRecords,
-  withTemplateDraft,
-} from "@/features/prompt-studio/template-drafts.mjs"
 import { PendingAssetDialog } from "@/features/pending-assets/pending-asset-dialog"
-
-import { BatchControlAdapter } from "@/services/batch-control-adapter.mjs"
-import {
-  CatalogResolverAdapter,
-  formatPromptText,
-  makeRouteTrace,
-} from "@/services/catalog-adapter.mjs"
-import { ImagegenHandoffAdapter } from "@/services/imagegen-handoff-adapter.mjs"
-import { paginateAssets } from "@/services/list-model.mjs"
-import { ProjectControlAdapter } from "@/services/project-control-adapter.mjs"
-import { ProjectWorkspaceAdapter } from "@/services/project-workspace.mjs"
-import { CodexStatusAdapter } from "@/services/codex-status-adapter.mjs"
-import { CodexAgentChatAdapter } from "@/services/codex-agent-chat-adapter.mjs"
-import {
-  DEFAULT_ALLOWED_TARGET_FIELDS,
-  DEFAULT_CONTROL_DIMENSIONS,
-  RouteModuleAdminAdapter,
-  RouteClassifierAdapter,
-  applyModuleOperationsPreview,
-  buildClassificationRequest,
-  createRouteBranchFile,
-  createRoutePresetPackage,
-  normalizeRouteModule,
-  parseRouteExchangeArtifact,
-  routeModulesEqual,
-  validateRouteModule,
-} from "@/services/route-module-workbench.mjs"
-
-declare global {
-  interface Window {
-    kaDesktopBridge?: {
-      setStudioDrawerOpen?: (input: { open: boolean; width?: number }) => Promise<JsonRecord>
-      openProjectDirectory?: (input: { projectId: string; kind: "project" | "output" }) => Promise<unknown>
-      openApiBatchSettings?: (input: {
-        projectId: string
-        baseUrl: string
-        username: string
-        password: string
-        maxWorkers: number
-        aspectRatio: string
-        imageSize: string
-      }) => Promise<JsonRecord>
-      loadApiCatalog?: (input: {
-        projectId: string
-        baseUrl: string
-        username: string
-        password: string
-      }) => Promise<JsonRecord>
-      selectApiDirectory?: (input: { purpose: "source" | "output" }) => Promise<JsonRecord>
-      startApiBatch?: (input: {
-        projectId: string
-        baseUrl: string
-        username: string
-        password: string
-        remoteProjectId: string
-        modelId: string
-        maxWorkers: number
-        aspectRatio: string
-        imageSize: string
-        operation: "generate" | "directory_redraw"
-        promptTemplates?: Record<string, string>
-        sourceSelectionToken?: string
-        outputSelectionToken?: string
-        redrawPrompt?: string
-      }) => Promise<JsonRecord>
-      prepareBuiltinImagegen?: (input: { projectId: string }) => Promise<unknown>
-      authorizeCodex?: () => Promise<JsonRecord>
-      saveJsonFile?: (input: { suggestedName: string; jsonText: string }) => Promise<JsonRecord>
-      selectProject?: (input: { projectId: string; expectedRevision: number }) => Promise<unknown>
-    }
-  }
-}
-
+import { saveStageTimingsWithRetry } from "@/services/stage-timing-persistence.mjs"
 
 import {
   JsonRecord,
   ProjectCard,
-  RouteModule,
-  RoutePreset,
-  PendingRouteImport,
   ToastState,
   workspaceAdapter,
   controlAdapter,
   codexStatusAdapter,
   codexAgentChatAdapter,
-  batchAdapter,
-  catalogAdapter,
-  imagegenAdapter,
-  routeAdminAdapter,
-  routeClassifierAdapter,
-  STYLES,
   ASSETS,
-  SHEETS,
-  REFERENCE_MODES,
-  OPERATION_LABELS,
   PHASE_LABELS,
   CURRENT_STAGE_LABELS,
   TASK_STAGE_BY_ACTION,
   STATE_LABELS,
   TASK_STATUS_LABELS,
   ACTIVE_TASK_STATUSES,
-  CODEX_MODEL_OPTIONS,
-  CODEX_REASONING_OPTIONS,
-  PRESET_STORAGE_KEY,
-  LEGACY_PRESET_STORAGE_KEY,
-  ACTIVE_PRESET_STORAGE_KEY,
-  BATCH_CUSTOM_FIELDS_STORAGE_KEY,
-  ROUTE_LIST_PAGE_SIZE,
-  nowIso,
   safeMessage,
   taskFailureSummary,
-  styleLabel,
-  assetLabel,
-  referenceLabel,
   percent,
   formatCount,
   formatTime,
   formatDuration,
-  uniqueId,
-  clone,
   projectNameFromScreenplay,
-  makeInitialPresets,
-  routeModulesFromCatalogSummary,
-  withoutRetiredCatalogEnhancers,
-  RETIRED_STARTER_PRESET_IDS,
-  withoutRetiredStarterPresets,
-  readStoredPresets,
-  savePresets,
-  blankReferenceSelections,
-  blankReferenceModes,
-  blankCustomReferenceFields,
-  readBatchCustomFields,
-  writeBatchCustomFields,
-  routePresetModulesEqual,
-  canonicalJson,
-  routePresetNameKey,
-  PromptPresetContextValue,
-  PromptPresetContext,
-  usePromptPresets,
-  readActivePresetId,
-  downloadJson,
   StatusDot,
   SectionHeading,
-  EmptyState,
   AgentChatCard,
 } from "@/features/workbench/workbench-foundation"
 
 import { MemoPromptStudioDrawer } from "@/features/prompt-studio/prompt-studio-drawer"
+
+type StageTimings = Record<string, number>
+type StageElapsedSeconds = Record<string, StageTimings>
 
 export default function App() {
   const { resolvedTheme, setTheme } = useTheme()
@@ -266,7 +117,14 @@ export default function App() {
   const [busyAction, setBusyAction] = React.useState<string | null>(null)
   const [tasks, setTasks] = React.useState<Record<string, JsonRecord>>({})
   const [clockNow, setClockNow] = React.useState(() => Date.now())
-  const [activeStageTiming, setActiveStageTiming] = React.useState<{ key: string; startedAt: number } | null>(null)
+  const [activeStageTiming, setActiveStageTiming] = React.useState<{
+    key: string
+    projectId: string
+    stageId: string
+    startedAt: number
+    accumulatedSeconds: number
+  } | null>(null)
+  const [stageElapsedSeconds, setStageElapsedSeconds] = React.useState<StageElapsedSeconds>({})
   const [taskLogOpen, setTaskLogOpen] = React.useState(false)
   const [dismissedFailureTaskIds, setDismissedFailureTaskIds] = React.useState<string[]>([])
   const [codexStatus, setCodexStatus] = React.useState<JsonRecord | null>(null)
@@ -286,6 +144,11 @@ export default function App() {
   const watchedTaskIds = React.useRef(new Set<string>())
   const watchedAgentChatIds = React.useRef(new Set<string>())
   const promptedPendingStates = React.useRef(new Set<string>())
+  const loadedStageTimingProjectIds = React.useRef(new Set<string>())
+  const stageTimingLoadPromises = React.useRef(new Map<string, Promise<StageTimings>>())
+  const savedStageTimingSignatures = React.useRef(new Map<string, string>())
+  const stageTimingSaveQueues = React.useRef(new Map<string, Promise<unknown>>())
+  const stageTimingSaveWarningProjectIds = React.useRef(new Set<string>())
 
   const activeProject = projects.find((project) => project.projectId === activeProjectId) ?? null
   const activeTask = activeProjectId ? tasks[activeProjectId] ?? null : null
@@ -306,6 +169,24 @@ export default function App() {
         tone === "warning" ? 6500 : 3600,
       )
     }
+  }, [])
+
+  const loadStageTimings = React.useCallback((projectId: string) => {
+    const existing = stageTimingLoadPromises.current.get(projectId)
+    if (existing) return existing
+    const current = controlAdapter.getStageTimings({ projectId }).then((result) => {
+      const stages = { ...result.stages }
+      loadedStageTimingProjectIds.current.add(projectId)
+      savedStageTimingSignatures.current.set(projectId, JSON.stringify(stages))
+      setStageElapsedSeconds((items) => ({ ...items, [projectId]: stages }))
+      return stages
+    }).finally(() => {
+      if (stageTimingLoadPromises.current.get(projectId) === current) {
+        stageTimingLoadPromises.current.delete(projectId)
+      }
+    })
+    stageTimingLoadPromises.current.set(projectId, current)
+    return current
   }, [])
 
   const checkCodexStatus = React.useCallback(async ({ quiet = false } = {}) => {
@@ -600,6 +481,11 @@ export default function App() {
         delete next[projectId]
         return next
       })
+      setStageElapsedSeconds((items) => {
+        const next = { ...items }
+        delete next[projectId]
+        return next
+      })
       setActiveProjectId((current) => current === projectId ? remaining[0]?.projectId ?? null : current)
       setSnapshot(null)
       setDeleteProjectOpen(false)
@@ -678,6 +564,9 @@ export default function App() {
     if (!activeProjectId || ACTIVE_TASK_STATUSES.has(String(activeTask?.status))) return false
     setBusyAction(action)
     try {
+      const savedProjectTiming = loadedStageTimingProjectIds.current.has(activeProjectId)
+        ? stageElapsedSeconds[activeProjectId] ?? {}
+        : await loadStageTimings(activeProjectId)
       const task = await controlAdapter.startTask({
         projectId: activeProjectId,
         action,
@@ -685,6 +574,14 @@ export default function App() {
         workbookEpisodeEnd: workbookScope.workbookEpisodeEnd ?? null,
         workbookAssetTypes: workbookScope.workbookAssetTypes ?? [],
       })
+      const pipelinePhase = String(snapshot?.pipeline?.phase ?? activeProject?.statusSummary?.phase ?? "")
+      const resumesAfterDesktopRestart = Object.keys(savedProjectTiming).length > 0
+        && !["complete", "waiting-generation"].includes(pipelinePhase)
+      const resumesInterruptedRun = ["paused", "failed"].includes(String(activeTask?.status))
+        || resumesAfterDesktopRestart
+      if (!resumesInterruptedRun && ["run-full-pipeline", "build-scoped-workbook", "analyze-screenplay", "split"].includes(action)) {
+        setStageElapsedSeconds((items) => ({ ...items, [activeProjectId]: {} }))
+      }
       setTasks((items) => ({ ...items, [activeProjectId]: task }))
       notify("任务已进入当前项目的独立队列")
       void watchTask(activeProjectId, task)
@@ -695,7 +592,7 @@ export default function App() {
     } finally {
       setBusyAction(null)
     }
-  }, [activeProjectId, activeTask?.status, notify, watchTask])
+  }, [activeProject?.statusSummary?.phase, activeProjectId, activeTask?.status, loadStageTimings, notify, snapshot?.pipeline?.phase, stageElapsedSeconds, watchTask])
 
   const pauseCurrentTask = React.useCallback(async () => {
     if (!activeProjectId || !activeTask?.taskId || !["queued", "running"].includes(activeTask.status)) return false
@@ -828,6 +725,15 @@ export default function App() {
   }, [activeProjectHasRunningTask, confirmedAgentProposalIds, notify, pauseCurrentTask, refreshProjects, runTask])
 
   React.useEffect(() => {
+    if (!activeProjectId || loadedStageTimingProjectIds.current.has(activeProjectId)) return
+    let cancelled = false
+    void loadStageTimings(activeProjectId).catch((error) => {
+      if (!cancelled) notify(safeMessage(error, "阶段用时读取失败"), "warning")
+    })
+    return () => { cancelled = true }
+  }, [activeProjectId, loadStageTimings, notify])
+
+  React.useEffect(() => {
     if (!activeProjectId) return
     let cancelled = false
     void controlAdapter.listTasks({ projectId: activeProjectId }).then(({ tasks: projectTasks }) => {
@@ -897,18 +803,18 @@ export default function App() {
     && pipelineStages.find((stage: JsonRecord) => stage.id === "analysis")?.state === "complete"
     && pipelineStages.find((stage: JsonRecord) => stage.id === "world-overview")?.state === "complete"
   const rawPipelinePhase = snapshot?.pipeline?.phase ?? summary.phase ?? "split"
+  const startTaskAction = pendingAssetCount === 0 && rawPipelinePhase === "asset-visual-specs"
+    ? "finalize-after-confirmation"
+    : "run-full-pipeline"
   const activeTaskStageId = activeProjectHasRunningTask
     ? activeTask?.action === "run-full-pipeline" || activeTask?.action === "build-scoped-workbook"
       ? rawPipelinePhase === "waiting-generation" || rawPipelinePhase === "complete" ? "excel" : rawPipelinePhase
       : TASK_STAGE_BY_ACTION[activeTask?.action]
     : null
-  const activeTaskStartedAtMs = Date.parse(String(activeTask?.startedAt ?? ""))
-  const activeTaskFinishedAtMs = Date.parse(String(activeTask?.finishedAt ?? ""))
-  const projectElapsedSeconds = Number.isFinite(activeTaskStartedAtMs)
-    ? Math.max(0, Math.floor(((activeTaskActuallyRunning
-      ? clockNow
-      : Number.isFinite(activeTaskFinishedAtMs) ? activeTaskFinishedAtMs : activeTaskStartedAtMs) - activeTaskStartedAtMs) / 1000))
-    : null
+  const projectStageElapsedSeconds = activeProjectId ? stageElapsedSeconds[activeProjectId] : null
+  const projectElapsedSeconds = activeProjectId && loadedStageTimingProjectIds.current.has(activeProjectId)
+    ? Object.values(projectStageElapsedSeconds ?? {}).reduce((total, seconds) => total + seconds, 0)
+    : undefined
   const displayPipelineStages = pipelineStages.map((stage: JsonRecord) => {
     if (activeTask?.status === "paused" && stage.state === "active") return { ...stage, state: "warning" }
     if (!activeTaskActuallyRunning && stage.state === "active") return { ...stage, state: "waiting" }
@@ -968,17 +874,101 @@ export default function App() {
   }, [activeTaskActuallyRunning, activeTask?.taskId])
 
   React.useEffect(() => {
-    if (!activeTaskActuallyRunning || !activeTaskStageId || !activeTask?.taskId) {
+    if (!activeStageTiming) return
+    const isSameStageStillRunning = activeTaskActuallyRunning
+      && activeProjectId === activeStageTiming.projectId
+      && activeTaskStageId === activeStageTiming.stageId
+      && activeTask?.taskId
+      && activeStageTiming.key === `${activeTask.taskId}:${activeTaskStageId}`
+    if (isSameStageStillRunning) return
+
+    const elapsedSeconds = activeStageTiming.accumulatedSeconds
+      + Math.max(0, Math.floor((Date.now() - activeStageTiming.startedAt) / 1000))
+    setStageElapsedSeconds((items) => ({
+      ...items,
+      [activeStageTiming.projectId]: {
+        ...items[activeStageTiming.projectId],
+        [activeStageTiming.stageId]: elapsedSeconds,
+      },
+    }))
+  }, [activeProjectId, activeStageTiming, activeTask?.taskId, activeTaskActuallyRunning, activeTaskStageId])
+
+  React.useEffect(() => {
+    if (!activeProjectId
+      || !loadedStageTimingProjectIds.current.has(activeProjectId)
+      || !activeTaskActuallyRunning
+      || !activeTaskStageId
+      || !activeTask?.taskId) {
       setActiveStageTiming(null)
       return
     }
     const key = `${activeTask.taskId}:${activeTaskStageId}`
-    setActiveStageTiming((current) => current?.key === key ? current : { key, startedAt: Date.now() })
-  }, [activeTask?.taskId, activeTaskActuallyRunning, activeTaskStageId])
+    setActiveStageTiming((current) => {
+      const stageId = String(activeTaskStageId)
+      const savedElapsedSeconds = stageElapsedSeconds[activeProjectId]?.[stageId] ?? 0
+      if (current?.key === key) {
+        const currentElapsedSeconds = current.accumulatedSeconds
+          + Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000))
+        return savedElapsedSeconds > currentElapsedSeconds
+          ? { ...current, startedAt: Date.now(), accumulatedSeconds: savedElapsedSeconds }
+          : current
+      }
+      return {
+        key,
+        projectId: activeProjectId,
+        stageId,
+        startedAt: Date.now(),
+        accumulatedSeconds: savedElapsedSeconds,
+      }
+    })
+  }, [activeProjectId, activeTask?.taskId, activeTaskActuallyRunning, activeTaskStageId, stageElapsedSeconds])
 
   const activeStageElapsedSeconds = activeStageTiming
-    ? Math.max(0, Math.floor((clockNow - activeStageTiming.startedAt) / 1000))
+    ? activeStageTiming.accumulatedSeconds
+      + Math.max(0, Math.floor((clockNow - activeStageTiming.startedAt) / 1000))
     : null
+
+  React.useEffect(() => {
+    if (!activeStageTiming) return
+    const elapsedSeconds = activeStageTiming.accumulatedSeconds
+      + Math.max(0, Math.floor((clockNow - activeStageTiming.startedAt) / 1000))
+    setStageElapsedSeconds((items) => {
+      if (items[activeStageTiming.projectId]?.[activeStageTiming.stageId] === elapsedSeconds) return items
+      return {
+        ...items,
+        [activeStageTiming.projectId]: {
+          ...items[activeStageTiming.projectId],
+          [activeStageTiming.stageId]: elapsedSeconds,
+        },
+      }
+    })
+  }, [activeStageTiming, clockNow])
+
+  React.useEffect(() => {
+    for (const [projectId, stages] of Object.entries(stageElapsedSeconds)) {
+      if (!loadedStageTimingProjectIds.current.has(projectId)) continue
+      const signature = JSON.stringify(stages)
+      if (savedStageTimingSignatures.current.get(projectId) === signature) continue
+      savedStageTimingSignatures.current.set(projectId, signature)
+      const prior = stageTimingSaveQueues.current.get(projectId) ?? Promise.resolve()
+      const current = prior.catch(() => undefined)
+        .then(() => saveStageTimingsWithRetry(controlAdapter, projectId, stages))
+        .then(() => { stageTimingSaveWarningProjectIds.current.delete(projectId) })
+        .catch((error) => {
+          if (savedStageTimingSignatures.current.get(projectId) === signature) {
+            savedStageTimingSignatures.current.delete(projectId)
+          }
+          if (!stageTimingSaveWarningProjectIds.current.has(projectId)) {
+            stageTimingSaveWarningProjectIds.current.add(projectId)
+            notify(safeMessage(error, "阶段用时保存失败"), "warning")
+          }
+        })
+        .finally(() => {
+          if (stageTimingSaveQueues.current.get(projectId) === current) stageTimingSaveQueues.current.delete(projectId)
+        })
+      stageTimingSaveQueues.current.set(projectId, current)
+    }
+  }, [notify, stageElapsedSeconds])
 
   React.useEffect(() => {
     if (!activeProjectId) return
@@ -1134,8 +1124,8 @@ export default function App() {
               </Card>
 
               <div className="flex flex-wrap justify-end gap-2 px-1" aria-label="流水线任务操作">
-                <Button onClick={() => void runTask("run-full-pipeline")} disabled={!activeProject || activeProjectHasRunningTask || pendingAssetsReady || busyAction === "run-full-pipeline"}>
-                  {busyAction === "run-full-pipeline" ? <LoaderCircle className="animate-spin" /> : <Play />}开始任务
+                <Button onClick={() => void runTask(startTaskAction)} disabled={!activeProject || activeProjectHasRunningTask || pendingAssetsReady || busyAction === startTaskAction}>
+                  {busyAction === startTaskAction ? <LoaderCircle className="animate-spin" /> : <Play />}{startTaskAction === "finalize-after-confirmation" ? "继续任务" : "开始任务"}
                 </Button>
                 <Button variant="destructive" onClick={() => void pauseCurrentTask()} disabled={!activeProjectHasRunningTask || busyAction === "pause-task"}>
                   {busyAction === "pause-task" ? <LoaderCircle className="animate-spin" /> : <Pause />}暂停任务
@@ -1174,37 +1164,56 @@ export default function App() {
                       </p>
                     </div>
                   )}
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
-                    {displayPipelineStages.map((stage: JsonRecord) => (
-                      <div
-                        key={stage.id}
-                        className={cn(
-                          "relative min-h-16 rounded-lg border bg-muted/20 px-3 py-2.5 transition-[border-color,background-color,box-shadow] duration-300",
-                          stage.state === "active" && "border-info/55 bg-info/8 shadow-sm",
-                          stage.state === "complete" && "border-success/60 bg-success/8",
-                        )}
-                      >
-                        <div className="flex items-center gap-2 text-[11px] font-medium">
-                          {stage.state === "active" && activeTaskActuallyRunning
-                            ? <LoaderCircle className="stage-running-spinner size-3.5 shrink-0 text-info" aria-label="运行中" />
-                            : <StatusDot state={stage.state} />}
-                          <span className="truncate">{stage.label}</span>
-                        </div>
-                        <div className="mt-1 flex items-center justify-between gap-2 pl-[18px] text-[10px] text-muted-foreground">
-                          <span>{STATE_LABELS[stage.state] ?? "未开始"}</span>
-                          {stage.id === activeTaskStageId && activeTaskActuallyRunning && activeStageElapsedSeconds !== null && (
-                            <span className="flex shrink-0 items-center gap-1 font-medium tabular-nums text-info" aria-label={`${stage.label}已运行 ${formatDuration(activeStageElapsedSeconds)}`}>
-                              <Timer className="size-3" aria-hidden="true" />{formatDuration(activeStageElapsedSeconds)}
-                            </span>
+                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
+                    {displayPipelineStages.map((stage: JsonRecord) => {
+                      const isRunning = stage.id === activeTaskStageId
+                        && stage.state === "active"
+                        && activeTaskActuallyRunning
+                      const completedElapsedSeconds = activeProjectId
+                        ? stageElapsedSeconds[activeProjectId]?.[String(stage.id)] ?? null
+                        : null
+                      const displayedElapsedSeconds = isRunning
+                        ? activeStageElapsedSeconds
+                        : stage.state === "complete" ? completedElapsedSeconds : null
+
+                      return (
+                        <div
+                          key={stage.id}
+                          className={cn(
+                            "flex min-h-[84px] min-w-0 flex-col rounded-xl border bg-muted/20 px-3 py-3 transition-[border-color,background-color,box-shadow] duration-300",
+                            stage.state === "active" && "border-info/55 bg-info/8 shadow-sm",
+                            stage.state === "complete" && "border-success/60 bg-success/8",
                           )}
+                        >
+                          <div className="flex min-w-0 items-center gap-2 text-xs font-semibold leading-5 text-foreground">
+                            {isRunning
+                              ? <LoaderCircle className="stage-running-spinner size-4 shrink-0 text-info" aria-label="运行中" />
+                              : <StatusDot state={stage.state} />}
+                            <span className="min-w-0 truncate">{stage.label}</span>
+                          </div>
+                          <div className="mt-auto flex min-w-0 items-center gap-2 text-[11px] leading-none text-muted-foreground">
+                            <span className="min-w-0 flex-1 truncate">{STATE_LABELS[stage.state] ?? "未开始"}</span>
+                            {displayedElapsedSeconds !== null && (
+                              <span
+                                className={cn(
+                                  "flex shrink-0 items-center gap-1 font-medium tabular-nums",
+                                  isRunning ? "text-info" : "text-muted-foreground",
+                                )}
+                                aria-label={`${stage.label}${isRunning ? "已运行" : "用时"} ${formatDuration(displayedElapsedSeconds)}`}
+                              >
+                                <Timer className="size-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+                                {formatDuration(displayedElapsedSeconds)}
+                              </span>
+                            )}
+                            {stage.state === "complete" && (
+                              <span className="grid size-4.5 shrink-0 place-items-center rounded-full border border-success/70 text-success" aria-label="此阶段已完成">
+                                <Check className="size-2.5" strokeWidth={2} aria-hidden="true" />
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        {stage.state === "complete" && (
-                          <span className="absolute right-2 bottom-2 grid size-5 place-items-center rounded-full bg-success text-success-foreground" aria-label="此阶段已完成">
-                            <Check className="size-3.5" aria-hidden="true" />
-                          </span>
-                        )}
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </CardContent>
               </Card>
@@ -1234,8 +1243,8 @@ export default function App() {
               <button
                 ref={batchStudioButtonRef}
                 type="button"
-                onClick={() => void setStudioOpen(!drawerOpen, "batch")}
-                disabled={!activeProject || pendingAssetCount > 0}
+                onClick={() => void setStudioOpen(!drawerOpen, activeProject ? "batch" : "templates")}
+                disabled={Boolean(activeProject && pendingAssetCount > 0)}
                 aria-expanded={drawerOpen}
                 aria-controls="prompt-studio-drawer"
                 aria-label={drawerOpen ? "关闭 Prompt Studio" : "打开 Prompt Studio"}
@@ -1352,7 +1361,6 @@ export default function App() {
         projectId={activeProjectId}
         projectBusy={activeProjectHasRunningTask}
         onCommitted={refreshActiveProjectState}
-        onFinalized={async () => { await runTask("finalize-after-confirmation") }}
         notify={notify}
       />
 

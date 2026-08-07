@@ -272,6 +272,26 @@ export function createApiRouteHandler(context) {
       sendJson(response, 200, { ok: true, data: preset });
       return;
     }
+    const stageTimingsMatch = pathname.match(/^\/api\/projects\/([^/]+)\/stage-timings$/u);
+    if (stageTimingsMatch) {
+      if (!services.stageTimingService) throw new HttpError(404, 'NOT_FOUND', '未知 API 端点');
+      const projectId = stageTimingsMatch[1];
+      requireMethod(request, 'GET', 'PUT');
+      let result;
+      try {
+        if (request.method === 'GET') {
+          await requireEmptyBody(request);
+          result = await services.stageTimingService.read({ projectId });
+        } else {
+          const input = exactRequestKeys(await readJsonBody(request), ['stages'], '阶段用时请求');
+          result = await services.stageTimingService.save({ projectId, stages: input.stages });
+        }
+      } catch (error) {
+        throw serviceHttpError(error);
+      }
+      sendJson(response, 200, { ok: true, data: result });
+      return;
+    }
     const imagegenHandoffMatch = pathname.match(/^\/api\/projects\/([^/]+)\/imagegen-handoff$/u);
     if (imagegenHandoffMatch) {
       if (!services.imagegenHandoffService) throw new HttpError(404, 'NOT_FOUND', '未知 API 端点');

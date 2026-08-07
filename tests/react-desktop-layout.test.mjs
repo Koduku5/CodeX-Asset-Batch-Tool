@@ -45,6 +45,7 @@ const readComponentSource = async (name) => {
 
 test('React desktop shell preserves the production-first single-column layout', async () => {
   const app = await readWorkbenchSource();
+  const timingPersistence = await read('src/ui/services/stage-timing-persistence.mjs');
 
   for (const text of [
     '项目任务',
@@ -59,7 +60,7 @@ test('React desktop shell preserves the production-first single-column layout', 
 
   assert.doesNotMatch(app, /lg:grid-cols-\[220px_minmax\(0,1fr\)_270px\]/u);
   assert.doesNotMatch(app, />流水线操作</u);
-  assert.match(app, /runTask\("run-full-pipeline"\)/u);
+  assert.match(app, /runTask\(startTaskAction\)/u);
   assert.ok(app.indexOf('项目任务') < app.indexOf('拖入 TXT / DOCX 剧本'));
   assert.ok(app.indexOf('拖入 TXT / DOCX 剧本') < app.indexOf('当前阶段：{currentStageLabel}'));
   assert.ok(app.indexOf('当前阶段：{currentStageLabel}') < app.indexOf('资产拆分概览'));
@@ -86,16 +87,31 @@ test('React desktop shell preserves the production-first single-column layout', 
   assert.match(app, /<Card className="gap-3 py-4 shadow-panel">/u);
   assert.match(app, /titleClassName="text-lg"/u);
   assert.match(app, /activeTaskActuallyRunning/u);
-  assert.match(app, /projectElapsedSeconds/u);
+  assert.match(app, /const projectStageElapsedSeconds = activeProjectId \? stageElapsedSeconds\[activeProjectId\] : null[\s\S]*const projectElapsedSeconds = activeProjectId && loadedStageTimingProjectIds\.current\.has\(activeProjectId\)[\s\S]*Object\.values\(projectStageElapsedSeconds \?\? \{\}\)\.reduce\(\(total, seconds\) => total \+ seconds, 0\)[\s\S]*: undefined/u);
+  assert.doesNotMatch(app, /activeTaskStartedAtMs|activeTaskFinishedAtMs/u);
   assert.match(app, /stage\.id === activeTaskStageId[\s\S]*activeStageElapsedSeconds/u);
+  assert.match(app, /stageElapsedSeconds[\s\S]*completedElapsedSeconds/u);
+  assert.match(app, /controlAdapter\.getStageTimings/u);
+  assert.match(app, /stageTimingLoadPromises[\s\S]*await loadStageTimings\(activeProjectId\)/u);
+  assert.match(app, /from "@\/services\/stage-timing-persistence\.mjs"/u);
+  assert.match(app, /saveStageTimingsWithRetry\(controlAdapter, projectId, stages\)/u);
+  assert.match(timingPersistence, /const SAVE_RETRY_DELAYS_MS = \[0, 250, 1000\][\s\S]*export async function saveStageTimingsWithRetry/u);
+  assert.match(app, /activeStageTiming\.stageId\]: elapsedSeconds/u);
+  assert.match(app, /!loadedStageTimingProjectIds\.current\.has\(activeProjectId\)[\s\S]*!activeTaskActuallyRunning/u);
+  assert.match(app, /resumesAfterDesktopRestart/u);
+  assert.match(app, /stage\.state === "complete" \? completedElapsedSeconds/u);
+  assert.match(app, /\{isRunning \? "已运行" : "用时"\}/u);
+  assert.doesNotMatch(app, /const progressLabel = stage\.progress/u);
+  assert.doesNotMatch(app, /border-t border-border\/60/u);
   assert.match(app, /stage-running-spinner/u);
-  assert.match(app, /stage\.state === "active" && activeTaskActuallyRunning/u);
+  assert.match(app, /stage\.state === "active"[\s\S]*activeTaskActuallyRunning/u);
   assert.match(app, /!activeTaskActuallyRunning && stage\.state === "active"[\s\S]*state: "waiting"/u);
   assert.match(app, /activeTaskActuallyRunning && \(currentPipelinePhase === "asset-visual-specs"/u);
   const taskActions = app.indexOf('aria-label="流水线任务操作"');
   assert.ok(app.indexOf('title="项目任务"') < taskActions && taskActions < app.indexOf('当前阶段：{currentStageLabel}'));
   assert.doesNotMatch(app, /formatDuration\(snapshot\?\.pipeline\?\.elapsedSeconds\)/u);
-  assert.match(app, /disabled=\{!activeProject \|\| activeProjectHasRunningTask \|\| pendingAssetsReady \|\| busyAction === "run-full-pipeline"\}/u);
+  assert.match(app, /startTaskAction = pendingAssetCount === 0 && rawPipelinePhase === "asset-visual-specs"/u);
+  assert.match(app, /disabled=\{!activeProject \|\| activeProjectHasRunningTask \|\| pendingAssetsReady \|\| busyAction === startTaskAction\}/u);
   assert.match(app, /disabled=\{!activeProjectHasRunningTask \|\| busyAction === "pause-task"\}/u);
   assert.match(app, /暂停任务/u);
   assert.match(app, /pausing: "正在暂停"/u);
@@ -109,7 +125,8 @@ test('React desktop shell preserves the production-first single-column layout', 
   assert.match(app, /dismissedFailureTaskIds/u);
   assert.match(app, /有 \{pendingAssetCount\} 项资产需要人工确认/u);
   assert.match(app, /<PendingAssetDialog/u);
-  assert.match(app, /runTask\("finalize-after-confirmation"\)/u);
+  assert.match(app, /runTask\(startTaskAction\)/u);
+  assert.doesNotMatch(app, /onFinalized=.*runTask/u);
   assert.match(app, /role=\{toast\.tone === "error" \? "alert" : "status"\}/u);
   assert.doesNotMatch(app, /summary\.currentTaskLabel/u);
   const authorizationCard = app.indexOf('Codex SDK 授权状态检测');
@@ -151,10 +168,10 @@ test('pipeline summary follows title, screenplay, total progress, visual detail,
   assert.match(app, /analysisStage\.currentEpisode/u);
   assert.match(app, /当前阶段：资产设定生成中/u);
   assert.match(app, /正在处理：/u);
-  assert.match(app, /sm:grid-cols-6/u);
+  assert.match(app, /sm:grid-cols-3 xl:grid-cols-6/u);
   assert.match(app, /Excel 制表中/u);
   assert.match(app, /资产生成中/u);
-  assert.match(app, /stage\.state === "active"[\s\S]*LoaderCircle/u);
+  assert.match(app, /isRunning[\s\S]*LoaderCircle/u);
   assert.match(app, /stage\.state === "complete"[\s\S]*此阶段已完成/u);
   assert.doesNotMatch(app.slice(title, cards), /等待任务/u);
   assert.doesNotMatch(app, /animate-ping/u);
@@ -235,14 +252,91 @@ test('Prompt Studio React migration keeps the four left modes and test workbench
 
 test('prompt fields remain one continuous document with one aligned value start', async () => {
   const fields = await read('src/ui/features/prompt-studio/prompt-field-list.tsx');
+  const drawer = await read('src/ui/features/prompt-studio/prompt-studio-drawer.tsx');
+  const templateStudio = await read('src/ui/features/prompt-studio/template-studio.tsx');
+  const templateState = await read('src/ui/features/prompt-studio/use-template-studio.ts');
   const select = await read('src/ui/components/ui/select.tsx');
 
-  assert.match(fields, /grid min-w-0 grid-cols-\[10\.5rem_minmax\(0,1fr\)\]/u);
+  assert.match(fields, /onReorder\?: \(fromIndex: number, toIndex: number\) => void/u);
+  assert.doesNotMatch(fields, /\bGripVertical\b/u);
+  assert.match(fields, /grid min-w-0 grid-cols-\[minmax\(6\.5rem,8rem\)_minmax\(0,1fr\)\].*sm:grid-cols-\[10\.5rem_minmax\(0,1fr\)\]/u);
   assert.match(fields, /items-start justify-end gap-0\.5/u);
   assert.match(fields, /text-right/u);
   assert.match(fields, /aria-hidden="true" className="shrink-0">:<\/span>/u);
+  assert.match(fields, /是否启用 AI 判断/u);
+  assert.match(fields, /<Switch[\s\S]*checked=\{agentDecisionActive\}[\s\S]*onCheckedChange/u);
+  assert.match(fields, /mb-1 flex justify-end pr-3/u);
+  assert.match(fields, /flex min-h-8 items-center justify-end/u);
+  assert.match(fields, /_2rem_6\.75rem/u);
+  assert.doesNotMatch(fields, /_6\.75rem_2rem/u);
+  assert.doesNotMatch(fields, /<Bot|AI 判断\{agentPlaceholders/u);
   assert.doesNotMatch(fields, /border-b/u);
+  assert.match(drawer, /const orderedFields = normalizeTemplateFieldOrder\(resolved\.promptFields, draft\?\.promptFields\)/u);
+  assert.match(templateState, /setDraftFields\(normalizeTemplateFieldOrder\(resolved\.promptFields, saved\?\.promptFields\)\)/u);
+  assert.match(templateStudio, /onReorder=\{reorderField\}/u);
+  assert.match(templateStudio, /按住可排序字段的整行即可拖动/u);
   assert.match(select, /select-value\]\]:truncate/u);
+});
+
+test('prompt field rows use long-press sorting while fixed routing fields stay anchored', async () => {
+  const fields = await read('src/ui/features/prompt-studio/prompt-field-list.tsx');
+  const templateStudio = await read('src/ui/features/prompt-studio/template-studio.tsx');
+  const templateState = await read('src/ui/features/prompt-studio/use-template-studio.ts');
+  const fieldOrder = await read('src/ui/features/prompt-studio/template-field-order.mjs');
+
+  assert.match(templateState, /from "@\/features\/prompt-studio\/template-field-order\.mjs"/u);
+  assert.match(fieldOrder, /const TEMPLATE_FIELD_REORDER_LOCKED_LABELS = new Set\(\["use case", "asset type"\]\)/u);
+  assert.match(fieldOrder, /const TEMPLATE_FIELD_REORDER_LOCKED_ORDER = \["use case", "asset type"\]/u);
+  assert.match(fieldOrder, /export function templateFieldReorderIsLocked\(field\) \{[\s\S]*TEMPLATE_FIELD_REORDER_LOCKED_LABELS\.has\(String\(field\?\.label \|\| ""\)\.trim\(\)\.toLocaleLowerCase\("en-US"\)\)/u);
+  assert.match(templateStudio, /onReorder=\{reorderField\} isReorderLocked=\{isReorderLocked\}/u);
+  assert.match(fieldOrder, /export function reorderTemplateFields\(fields, fromIndex, toIndex\) \{[\s\S]*crossesLockedField[\s\S]*templateFieldReorderIsLocked\(fields\[fromIndex\]\) \|\| crossesLockedField/u);
+  assert.match(templateState, /isReorderLocked: templateFieldReorderIsLocked/u);
+  assert.match(fieldOrder, /const movableFields = orderedFields\.filter\(\(field\) => !templateFieldReorderIsLocked\(field\)\)[\s\S]*const lockedFields = TEMPLATE_FIELD_REORDER_LOCKED_ORDER[\s\S]*\.map\(\(lockedLabel\) => orderedFields\.find\(\(field\) => \([\s\S]*\.toLocaleLowerCase\("en-US"\) === lockedLabel[\s\S]*\.filter\(Boolean\)[\s\S]*return \[\.\.\.lockedFields, \.\.\.movableFields\]/u);
+  assert.doesNotMatch(fieldOrder, /formalIndex|anchoredFields\.splice/u);
+  assert.match(templateStudio, /Use case 与 Asset type 始终固定在顶部/u);
+
+  assert.match(fields, /isReorderLocked\?: \(field: PromptField, index: number\) => boolean/u);
+  assert.match(fields, /const ROW_DRAG_HOLD_MS = \d+/u);
+  assert.match(fields, /const reorderLocked = Boolean\(editable && onReorder && isReorderLocked\?\.\(field, index\)\)[\s\S]*const reorderable = Boolean\(editable && onReorder && !reorderLocked\)/u);
+  assert.match(fields, /data-prompt-field-index=\{index\}[\s\S]*data-prompt-field-reorderable=\{reorderable \? "true" : undefined\}[\s\S]*data-prompt-field-reorder-locked=\{reorderLocked \? "true" : undefined\}/u);
+  assert.match(fields, /onPointerDown=\{reorderable \? \(event\) => \{[\s\S]*pendingRowDragRef\.current = pending[\s\S]*window\.setTimeout\([\s\S]*pointerDragIndexRef\.current = index[\s\S]*ROW_DRAG_HOLD_MS\)[\s\S]*\} : undefined\}/u);
+  assert.match(fields, /\(event\.target as HTMLElement\)\.closest\("button, \[role='switch'\]"\)/u);
+  assert.match(fields, /document\.addEventListener\("pointermove", continuePointerDrag, \{ passive: false \}\)/u);
+  assert.match(fields, /elementFromPoint\(event\.clientX, event\.clientY\)[\s\S]*closest\("\[data-prompt-field-index\]"\)/u);
+
+  assert.match(fields, /const canReorderField[\s\S]*isReorderLocked\?\.\(fields\[fromIndex\], fromIndex\)[\s\S]*fields\.some\([\s\S]*isReorderLocked\?\.\(field, index\)/u);
+  assert.match(fields, /onKeyDownCapture=\{reorderable \? \(event\) => \{[\s\S]*event\.altKey[\s\S]*\["ArrowUp", "ArrowDown"\][\s\S]*canReorderField\(index, targetIndex\)[\s\S]*onReorder\?\.\(index, targetIndex\)[\s\S]*\} : undefined\}/u);
+});
+
+test('prompt field drag motion follows the pointer, shifts neighbors, and settles accessibly', async () => {
+  const fields = await read('src/ui/features/prompt-studio/prompt-field-list.tsx');
+
+  assert.match(fields, /style\.setProperty\("--prompt-field-drag-y", `\$\{nextTranslateY\}px`\)/u);
+  assert.match(fields, /transform: `translate3d\(0, var\(--prompt-field-drag-y, 0px\), 0\) scale\(\$\{reduceMotion \? 1 : 1\.0\d+\}\)`/u);
+
+  assert.match(fields, /if \(label === activeDragLabelRef\.current\) continue[\s\S]*const deltaY = beforeRect\.top - row\.getBoundingClientRect\(\)\.top[\s\S]*row\.style\.transform = `translate3d\(0, \$\{deltaY\}px, 0\)`[\s\S]*window\.requestAnimationFrame\(\(\) => \{[\s\S]*row\.style\.transition = "transform 320ms cubic-bezier\(0\.22, 1, 0\.36, 1\)"[\s\S]*row\.style\.transform = "translate3d\(0, 0, 0\)"/u);
+  assert.match(fields, /activeRow\.style\.transition = "transform 280ms cubic-bezier\(0\.22, 1, 0\.36, 1\)"[\s\S]*activeRow\.style\.removeProperty\("--prompt-field-drag-y"\)/u);
+
+  assert.match(fields, /const reduceMotion = window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches[\s\S]*if \(beforeRects && !reduceMotion\)/u);
+  assert.match(fields, /settleWithMotion = currentTransform !== "none"[\s\S]*&& !window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches/u);
+});
+
+test('AI judgment editor restores opener focus and exposes required validation', async () => {
+  const fields = await read('src/ui/features/prompt-studio/prompt-field-list.tsx');
+
+  assert.match(fields, /const agentEditorTriggerRef = React\.useRef<HTMLButtonElement \| null>\(null\)/u);
+  assert.match(fields, /onClick=\{\(event\) => \{[\s\S]*agentEditorTriggerRef\.current = event\.currentTarget[\s\S]*setAgentEditor\(/u);
+  assert.match(fields, /aria-haspopup=\{agentDecisionActive \? undefined : "dialog"\}/u);
+  assert.match(fields, /aria-controls=\{agentDecisionActive \? undefined : `\$\{idPrefix\}-agent-dialog`\}/u);
+  assert.match(fields, /aria-expanded=\{agentEditor\?\.index === index\}/u);
+  assert.match(fields, /aria-label=\{`编辑“\$\{field\.label\}”的 AI 判断需求`\}[\s\S]*requirements: agentPlaceholders\.map/u);
+  assert.match(fields, /这里只修改已有占位符的判断需求；字段中的其他固定文字会原样保留/u);
+  assert.match(fields, /onCloseAutoFocus=\{\(event\) => \{[\s\S]*event\.preventDefault\(\)[\s\S]*agentEditorTriggerRef\.current\?\.focus\(\)/u);
+  assert.match(fields, /const missing = !requirement\.trim\(\)[\s\S]*const invalid = !agentRequirementIsValid\(requirement\)/u);
+  assert.match(fields, /具体判断需求\{agentEditor\.requirements\.length[\s\S]*（必填）/u);
+  assert.match(fields, /value=\{requirement\}[\s\S]*required[\s\S]*aria-invalid=\{invalid\}[\s\S]*aria-describedby=\{`\$\{requirementId\}-help`\}/u);
+  assert.match(fields, /\{missing[\s\S]*请填写具体判断需求；此项为必填。[\s\S]*需求必须是单行文字，且不能包含【】。/u);
+  assert.match(fields, /disabled=\{!agentEditor\?\.requirements\.every\(agentRequirementIsValid\)\}/u);
 });
 
 test('route preset and branch exchange uses desktop save and atomic multi-file conflict review', async () => {
@@ -284,6 +378,8 @@ test('batch classification stays in the formal batch panel and template drafts f
   assert.doesNotMatch(routeSource, /runTask\("classify-prompt-branches"\)/u);
   assert.match(batchSource, /readTemplateDraft/u);
   assert.match(app, /promptOverridesBySheet/u);
+  assert.match(app, /AI 判断.*【由agent 具体判断说明：…】.*普通文字和空值仍按固定配置处理/u);
+  assert.match(app, /agentDecisionTags/u);
   assert.match(app, /保留当前草稿/u);
   assert.match(app, /function RouteFieldPreview/u);
   assert.match(app, /点击字段查看详情/u);

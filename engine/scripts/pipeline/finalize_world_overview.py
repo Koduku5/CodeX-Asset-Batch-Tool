@@ -77,6 +77,16 @@ def clean_overview_content(value: object) -> str:
     return content
 
 
+def read_overview_candidate(path: Path) -> object:
+    submitted = sys.stdin.read()
+    if not submitted.strip():
+        return read_json(path, "世界观总览.json")
+    try:
+        return json.loads(submitted)
+    except json.JSONDecodeError as exc:
+        fail(f"提交的世界观总览不是有效 JSON（第 {exc.lineno} 行）")
+
+
 def validate_complete_receipt(
     value: object,
     *,
@@ -164,7 +174,7 @@ def main() -> None:
         )
         coverage_fingerprint = canonical_sha256(receipt)
         overview_path = cache / "世界观总览.json"
-        content = clean_overview_content(read_json(overview_path, "世界观总览.json"))
+        content = clean_overview_content(read_overview_candidate(overview_path))
         quality_issues = world_overview_quality_issues(content, len(records))
         if quality_issues:
             fail("世界观总览质量不合格：" + "；".join(quality_issues))

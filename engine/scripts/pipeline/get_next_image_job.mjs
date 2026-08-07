@@ -333,6 +333,11 @@ const main = async () => {
     ) {
       throw new Error(`内置路由缺少必填参考图片：${promptSpec.styleId}/${item.sheetName}`);
     }
+    if (builtinSheetIsEnabled(builtinPromptBatch, item) && promptSpec.status !== "configured") {
+      throw new Error(
+        `内置任务提示词配置无效：${item.key}：${promptSpec.message || promptSpec.status}`,
+      );
+    }
     builtinPromptSpecByKey.set(item.key, promptSpec);
     referencePathsByKey.set(item.key, referencePaths);
     builtinPromptFingerprintByKey.set(

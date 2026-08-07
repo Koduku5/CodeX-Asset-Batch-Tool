@@ -1,52 +1,33 @@
 import * as React from "react"
 import {
-  Activity,
-  AlertTriangle,
-  Bot,
   Boxes,
-  Check,
   CheckCircle2,
   ChevronLeft,
-  ChevronDown,
   ChevronRight,
   ClipboardCopy,
   CloudCog,
   Copy,
-  Database,
   Download,
   Eye,
   EyeOff,
-  FileOutput,
   FileText,
   FolderOpen,
   ImagePlus,
-  Layers3,
   LoaderCircle,
-  Moon,
-  MoreHorizontal,
-  Network,
-  PackageOpen,
-  PanelRightOpen,
-  Pause,
   Pencil,
   Play,
   Plus,
   RefreshCw,
   Route,
   Save,
-  Send,
   Sparkles,
-  Square,
-  Sun,
   TestTube2,
-  Timer,
   Trash2,
   Upload,
   WandSparkles,
   X,
 } from "lucide-react"
 
-import { useTheme } from "@/components/theme-provider"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -71,7 +52,6 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
@@ -80,38 +60,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { PromptFieldList } from "@/features/prompt-studio/prompt-field-list"
+import { RouteFieldPreview } from "@/features/prompt-studio/route-field-preview"
+import { TemplateStudio } from "@/features/prompt-studio/template-studio"
+import { ValidationStudio } from "@/features/prompt-studio/validation-studio"
 import {
-  readLegacyTemplateDrafts,
+  normalizeTemplateFieldOrder,
+} from "@/features/prompt-studio/template-field-order.mjs"
+import {
   readTemplateDraft,
   templateDraftRecords,
-  withTemplateDraft,
 } from "@/features/prompt-studio/template-drafts.mjs"
-import { PendingAssetDialog } from "@/features/pending-assets/pending-asset-dialog"
 
-import { BatchControlAdapter } from "@/services/batch-control-adapter.mjs"
 import {
-  CatalogResolverAdapter,
   formatPromptText,
-  makeRouteTrace,
 } from "@/services/catalog-adapter.mjs"
-import { ImagegenHandoffAdapter } from "@/services/imagegen-handoff-adapter.mjs"
 import { paginateAssets } from "@/services/list-model.mjs"
-import { ProjectControlAdapter } from "@/services/project-control-adapter.mjs"
-import { ProjectWorkspaceAdapter } from "@/services/project-workspace.mjs"
-import { CodexStatusAdapter } from "@/services/codex-status-adapter.mjs"
-import { CodexAgentChatAdapter } from "@/services/codex-agent-chat-adapter.mjs"
 import {
   DEFAULT_ALLOWED_TARGET_FIELDS,
   DEFAULT_CONTROL_DIMENSIONS,
-  RouteModuleAdminAdapter,
-  RouteClassifierAdapter,
   applyModuleOperationsPreview,
   buildClassificationRequest,
   createRouteBranchFile,
@@ -122,63 +92,12 @@ import {
   validateRouteModule,
 } from "@/services/route-module-workbench.mjs"
 
-declare global {
-  interface Window {
-    kaDesktopBridge?: {
-      setStudioDrawerOpen?: (input: { open: boolean; width?: number }) => Promise<JsonRecord>
-      openProjectDirectory?: (input: { projectId: string; kind: "project" | "output" }) => Promise<unknown>
-      openApiBatchSettings?: (input: {
-        projectId: string
-        baseUrl: string
-        username: string
-        password: string
-        maxWorkers: number
-        aspectRatio: string
-        imageSize: string
-      }) => Promise<JsonRecord>
-      loadApiCatalog?: (input: {
-        projectId: string
-        baseUrl: string
-        username: string
-        password: string
-      }) => Promise<JsonRecord>
-      selectApiDirectory?: (input: { purpose: "source" | "output" }) => Promise<JsonRecord>
-      startApiBatch?: (input: {
-        projectId: string
-        baseUrl: string
-        username: string
-        password: string
-        remoteProjectId: string
-        modelId: string
-        maxWorkers: number
-        aspectRatio: string
-        imageSize: string
-        operation: "generate" | "directory_redraw"
-        promptTemplates?: Record<string, string>
-        sourceSelectionToken?: string
-        outputSelectionToken?: string
-        redrawPrompt?: string
-      }) => Promise<JsonRecord>
-      prepareBuiltinImagegen?: (input: { projectId: string }) => Promise<unknown>
-      authorizeCodex?: () => Promise<JsonRecord>
-      saveJsonFile?: (input: { suggestedName: string; jsonText: string }) => Promise<JsonRecord>
-      selectProject?: (input: { projectId: string; expectedRevision: number }) => Promise<unknown>
-    }
-  }
-}
-
-
 import {
   JsonRecord,
-  ProjectCard,
   RouteModule,
   RoutePreset,
   PendingRouteImport,
   ToastState,
-  workspaceAdapter,
-  controlAdapter,
-  codexStatusAdapter,
-  codexAgentChatAdapter,
   batchAdapter,
   catalogAdapter,
   imagegenAdapter,
@@ -189,37 +108,17 @@ import {
   SHEETS,
   REFERENCE_MODES,
   OPERATION_LABELS,
-  PHASE_LABELS,
-  CURRENT_STAGE_LABELS,
-  TASK_STAGE_BY_ACTION,
-  STATE_LABELS,
-  TASK_STATUS_LABELS,
-  ACTIVE_TASK_STATUSES,
-  CODEX_MODEL_OPTIONS,
-  CODEX_REASONING_OPTIONS,
-  PRESET_STORAGE_KEY,
-  LEGACY_PRESET_STORAGE_KEY,
   ACTIVE_PRESET_STORAGE_KEY,
-  BATCH_CUSTOM_FIELDS_STORAGE_KEY,
   ROUTE_LIST_PAGE_SIZE,
   nowIso,
   safeMessage,
-  taskFailureSummary,
   styleLabel,
   assetLabel,
-  referenceLabel,
-  percent,
   formatCount,
-  formatTime,
-  formatDuration,
   uniqueId,
   clone,
-  projectNameFromScreenplay,
-  makeInitialPresets,
   routeModulesFromCatalogSummary,
   withoutRetiredCatalogEnhancers,
-  RETIRED_STARTER_PRESET_IDS,
-  withoutRetiredStarterPresets,
   readStoredPresets,
   savePresets,
   blankReferenceSelections,
@@ -228,7 +127,6 @@ import {
   readBatchCustomFields,
   writeBatchCustomFields,
   routePresetModulesEqual,
-  canonicalJson,
   routePresetNameKey,
   PromptPresetContextValue,
   PromptPresetContext,
@@ -238,7 +136,6 @@ import {
   StatusDot,
   SectionHeading,
   EmptyState,
-  AgentChatCard,
 } from "@/features/workbench/workbench-foundation"
 
 type DrawerProps = {
@@ -593,21 +490,22 @@ function BatchStudio({ projectId, runTask, notify }: { projectId: string | null;
         const hasCustomFields = mode === "custom" && count > 0
         if (!draft && !hasCustomFields) return [sheet, null]
         const resolved = await catalogAdapter.resolve({ style, asset: assetId, referenceMode: mode, referenceCount: count })
-        const draftValues = new Map((draft?.promptFields ?? []).map((field: JsonRecord) => [field.label, field.value]))
+        const formalLabels = new Set(resolved.promptFields.map((field: JsonRecord) => String(field.label)))
+        const orderedFields = normalizeTemplateFieldOrder(resolved.promptFields, draft?.promptFields)
+        const customFields = orderedFields.filter((field: JsonRecord) => !formalLabels.has(String(field.label)))
         const custom = customFieldsBySheet[sheet]
-        const promptFields = resolved.promptFields.map((field: JsonRecord) => ({
+        const promptFields = orderedFields.map((field: JsonRecord) => ({
           ...field,
           value: hasCustomFields && field.label === "Input images"
             ? custom.inputImages
             : hasCustomFields && field.label === "Primary request"
               ? custom.primaryRequest
-              : draftValues.has(field.label)
-                ? draftValues.get(field.label)
-                : field.value,
+              : field.value,
         }))
         return [sheet, {
           routeMode: count ? "reference" : "default",
           promptText: promptFields.map((field: JsonRecord) => `${field.label}: ${field.value}`).join("\n"),
+          ...(customFields.length ? { customFieldLabels: customFields.map((field: JsonRecord) => field.label) } : {}),
         }]
       })))
       const configuration = {
@@ -1018,65 +916,6 @@ function BatchStudio({ projectId, runTask, notify }: { projectId: string | null;
         </DialogContent>
       </Dialog>
     </ScrollArea>
-  )
-}
-
-function RouteFieldPreview({ module, preview }: { module: RouteModule; preview: JsonRecord | null }) {
-  const previewDiffs: JsonRecord[] = Array.isArray(preview?.applied?.diff) ? preview.applied.diff : []
-  const diffByField = new Map(previewDiffs.map((diff) => [String(diff.field || ""), diff]))
-  const plannedFields: string[] = [...new Set<string>(
-    (module.operations as JsonRecord[])
-      .filter((operation: JsonRecord) => operation.op !== "replaceWith")
-      .map((operation: JsonRecord) => String(operation.field || "").trim())
-      .filter(Boolean),
-  )]
-  const visibleFields: string[] = preview
-    ? [...new Set<string>(previewDiffs.map((diff) => String(diff.field || "").trim()).filter(Boolean))]
-    : plannedFields
-
-  if (!visibleFields.length) {
-    return (
-      <EmptyState icon={FileText}>
-        {preview ? "刷新完成：当前设置没有产生字段变化" : "请先在下方添加要修改的字段"}
-      </EmptyState>
-    )
-  }
-
-  return (
-    <div className="space-y-2">
-      <p className="text-[10px] text-muted-foreground">{visibleFields.length} 个字段将被修改 · 点击字段查看详情</p>
-      {visibleFields.map((field) => {
-        const diff = diffByField.get(field)
-        const fieldOperations = module.operations.filter((operation: JsonRecord) => operation.op !== "replaceWith" && operation.field === field)
-        return (
-          <details key={field} className="group overflow-hidden rounded-lg border bg-background">
-            <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 px-3 py-2.5 outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-              <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
-              <span className="min-w-0 flex-1 truncate text-xs font-medium">{field}</span>
-              <Badge variant={diff ? "success" : "secondary"}>{diff ? "已生成预览" : "将被修改"}</Badge>
-            </summary>
-            <div className="border-t p-3">
-              {diff ? (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-md bg-muted/35 p-3"><p className="mb-1 text-[10px] text-muted-foreground">修改前</p><p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">{diff.before || "（空）"}</p></div>
-                  <div className="rounded-md bg-primary/5 p-3"><p className="mb-1 text-[10px] text-primary">修改后</p><p className="whitespace-pre-wrap break-words text-xs leading-relaxed">{diff.after || "（空）"}</p></div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {fieldOperations.map((operation: JsonRecord, index: number) => (
-                    <div key={`${field}-${index}`} className="rounded-md bg-muted/35 p-3">
-                      <Badge variant="outline">{OPERATION_LABELS[operation.op] || operation.op}</Badge>
-                      <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed">{operation.value || "（尚未填写内容）"}</p>
-                    </div>
-                  ))}
-                  <p className="text-[10px] text-muted-foreground">点击右上角“刷新预览”，读取这个字段真实的修改前与修改后。</p>
-                </div>
-              )}
-            </div>
-          </details>
-        )
-      })}
-    </div>
   )
 }
 
@@ -1724,192 +1563,5 @@ function RouteStudio({ notify }: { notify: DrawerProps["notify"] }) {
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}><DialogContent><DialogHeader><DialogTitle>重命名当前预设</DialogTitle><DialogDescription>名称只用于团队识别，预设和分支的稳定编号不会改变。</DialogDescription></DialogHeader><div className="space-y-2"><Label htmlFor="rename-preset">预设名称</Label><Input id="rename-preset" value={renameValue} onChange={(event) => setRenameValue(event.target.value)} /></div><DialogFooter><Button variant="outline" onClick={() => setRenameOpen(false)}>取消</Button><Button onClick={renamePreset}>保存名称</Button></DialogFooter></DialogContent></Dialog>
       <Dialog open={exportOpen} onOpenChange={setExportOpen}><DialogContent><DialogHeader><DialogTitle>导出当前预设</DialogTitle><DialogDescription>打包当前卡片的基础提示词、全部路由分支、判断条件、修改内容和测试样例，交给其他成员导入使用。</DialogDescription></DialogHeader><div className="space-y-2"><Label htmlFor="export-preset">导出名称</Label><Input id="export-preset" value={exportValue} onChange={(event) => setExportValue(event.target.value)} /></div><DialogFooter><Button variant="outline" onClick={() => setExportOpen(false)}>取消</Button><Button onClick={() => void exportPreset()}><Download />导出文件</Button></DialogFooter></DialogContent></Dialog>
     </div>
-  )
-}
-
-function TemplateStudio({ notify }: { notify: DrawerProps["notify"] }) {
-  const { activePreset, setPresets } = usePromptPresets()
-  const [style, setStyle] = React.useState("anime")
-  const [asset, setAsset] = React.useState("prop")
-  const [referenceMode, setReferenceMode] = React.useState("none")
-  const [result, setResult] = React.useState<JsonRecord | null>(null)
-  const [draftFields, setDraftFields] = React.useState<JsonRecord[]>([])
-  const [hasSavedDraft, setHasSavedDraft] = React.useState(false)
-  const [loading, setLoading] = React.useState(false)
-
-  const resolve = React.useCallback(async () => {
-    setLoading(true)
-    try {
-      const resolved = await catalogAdapter.resolve({ style, asset, referenceMode, referenceCount: referenceMode === "visual-consistency" ? 2 : referenceMode === "none" ? 0 : 1 })
-      const saved = readTemplateDraft(activePreset?.templates, style, asset, referenceMode)
-      setResult(resolved)
-      setDraftFields(clone(saved?.promptFields ?? resolved.promptFields))
-      setHasSavedDraft(Boolean(saved))
-    } catch (error) { notify(safeMessage(error, "基础模板读取失败"), "error") }
-    finally { setLoading(false) }
-  }, [activePreset?.id, asset, notify, referenceMode, style])
-
-  React.useEffect(() => { const timer = window.setTimeout(() => void resolve(), 180); return () => window.clearTimeout(timer) }, [resolve])
-
-  const saveDraft = () => {
-    if (!activePreset || !result || !draftFields.length) return
-    const templates = withTemplateDraft(activePreset.templates, style, asset, referenceMode, draftFields)
-    setPresets((items) => items.map((preset) => preset.id === activePreset.id ? {
-      ...preset,
-      revision: preset.revision + 1,
-      updatedAt: nowIso(),
-      templates,
-    } : preset))
-    setHasSavedDraft(true)
-    notify(`基础提示词草稿已保存到预设“${activePreset.name}”；保存批次时会写入对应资产类别`)
-  }
-
-  const restoreFormal = () => {
-    if (!result) return
-    setDraftFields(clone(result.promptFields))
-    notify("已恢复为正式注册表解析值；点击“保留当前草稿”后才会覆盖已保存草稿")
-  }
-
-  return (
-    <ScrollArea className="h-full"><div className="space-y-4 p-5">
-      <Card><CardContent className="flex flex-wrap items-center gap-x-5 gap-y-2 p-3">
-        <div className="flex items-center gap-2"><Label className="whitespace-nowrap">制作风格</Label><Select value={style} onValueChange={setStyle}><SelectTrigger className="w-28"><SelectValue /></SelectTrigger><SelectContent>{STYLES.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent></Select></div>
-        <div className="flex items-center gap-2"><Label className="whitespace-nowrap">资产类型</Label><Select value={asset} onValueChange={setAsset}><SelectTrigger className="w-28"><SelectValue /></SelectTrigger><SelectContent>{ASSETS.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent></Select></div>
-        <div className="flex items-center gap-2"><Label className="whitespace-nowrap">参考图方式</Label><Select value={referenceMode} onValueChange={setReferenceMode}><SelectTrigger className="w-40"><SelectValue /></SelectTrigger><SelectContent>{REFERENCE_MODES.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent></Select></div>
-        <Badge variant={referenceMode === "none" ? "muted" : "info"} className="ml-auto">{referenceMode === "none" ? "无参考图基础模板" : "有参考图基础模板"} · {draftFields.length || (referenceMode === "none" ? 11 : 12)} 字段</Badge>
-      </CardContent></Card>
-      <Card>
-        <CardHeader className="pb-3"><SectionHeading title="基础字段编辑" description="当前组合的全部固定字段集中显示在一个栏目中。" action={loading ? <LoaderCircle className="size-4 animate-spin text-primary" /> : <Badge variant={hasSavedDraft ? "warning" : "success"}>{hasSavedDraft ? "已保留草稿" : "正式注册表"}</Badge>} /></CardHeader>
-        <CardContent className="space-y-3">
-          <details className="group overflow-hidden rounded-lg border bg-muted/10">
-            <summary className="flex h-9 cursor-pointer list-none items-center gap-2 px-3 text-xs font-medium outline-none hover:bg-accent/45 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />路由轨迹<span className="ml-auto text-[10px] text-muted-foreground">{result ? makeRouteTrace(result).length : 0} 项</span></summary>
-            <div className="flex flex-wrap gap-2 border-t px-3 py-2.5">{result ? makeRouteTrace(result).map((item: string) => <Badge key={item} variant="outline" className="font-mono text-[10px]">{item}</Badge>) : <span className="text-xs text-muted-foreground">读取中…</span>}</div>
-          </details>
-          <PromptFieldList idPrefix="template-field" fields={draftFields as { label: string; value: string }[]} editable onChange={(index, value) => setDraftFields((items) => items.map((entry, itemIndex) => itemIndex === index ? { ...entry, value } : entry))} />
-        </CardContent>
-      </Card>
-      <div className="sticky bottom-0 -mx-5 flex flex-wrap justify-end gap-2 border-t bg-background px-5 py-4"><Button variant="outline" onClick={restoreFormal} disabled={!result}><RefreshCw />恢复正式解析值</Button><Button variant="outline" onClick={() => navigator.clipboard.writeText(draftFields.map(({ label, value }) => `${label}: ${value}`).join("\n")).then(() => notify("当前字段已复制")).catch(() => notify("复制失败", "error"))} disabled={!draftFields.length}><ClipboardCopy />复制当前字段</Button><Button onClick={saveDraft} disabled={!result || loading}><Save />保留当前草稿</Button></div>
-    </div></ScrollArea>
-  )
-}
-
-function ValidationStudio({ projectName, notify }: { projectName: string | null; notify: DrawerProps["notify"] }) {
-  const [style, setStyle] = React.useState("cg")
-  const [asset, setAsset] = React.useState("scene")
-  const [referenceMode, setReferenceMode] = React.useState("none")
-  const [assetId, setAssetId] = React.useState("")
-  const [productionNotes, setProductionNotes] = React.useState("")
-  const [result, setResult] = React.useState<JsonRecord | null>(null)
-  const [loading, setLoading] = React.useState(false)
-  const [testImage, setTestImage] = React.useState<{ url: string; name: string } | null>(null)
-  const [testStatus, setTestStatus] = React.useState("先完成解析，再点击出图测试")
-  const testImageInputRef = React.useRef<HTMLInputElement>(null)
-
-  React.useEffect(() => () => {
-    if (testImage?.url) URL.revokeObjectURL(testImage.url)
-  }, [testImage?.url])
-
-  const validateOne = async () => {
-    if (!productionNotes.trim()) {
-      notify("请先填写这个资产的完整制作说明", "warning")
-      return
-    }
-    setLoading(true)
-    setTestImage(null)
-    setTestStatus("正在解析最终 Prompt…")
-    try {
-      const resolved = await catalogAdapter.resolve({
-        style,
-        asset,
-        referenceMode,
-        referenceCount: referenceMode === "visual-consistency" ? 2 : referenceMode === "none" ? 0 : 1,
-        productionNotes,
-      })
-      setResult(resolved)
-      setTestStatus("解析完成，可以点击出图测试")
-      notify("单项解析校验完成")
-    } catch (error) {
-      setResult(null)
-      setTestStatus("解析失败，修正条件后重新校验")
-      notify(safeMessage(error, "单项解析失败"), "error")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const prepareImageTest = async () => {
-    if (!result) return
-    try {
-      const handoff = [
-        "请使用 Codex 内置 image_gen 生成 1 张单项测试图；这是 Prompt Studio 的只读测试，不要改动批量队列。",
-        `制作风格：${styleLabel(style)}`,
-        `资产类型：${assetLabel(asset)}`,
-        `资产：${assetId || "未命名测试项"}`,
-        "最终 Prompt：",
-        formatPromptText(result),
-      ].join("\n")
-      await navigator.clipboard.writeText(handoff)
-      setTestStatus("最终 Prompt 已复制；交给 Codex 内置 ImageGen 后，将生成图片拖回右侧窗口")
-      notify("单项出图测试 Prompt 已复制")
-    } catch {
-      setTestStatus("无法访问剪贴板，请先复制最终 Prompt 再交给 Codex 内置 ImageGen")
-      notify("出图测试 Prompt 复制失败", "error")
-    }
-  }
-
-  const receiveTestImage = (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      notify("图片返回窗口只接受图片文件", "warning")
-      return
-    }
-    const url = URL.createObjectURL(file)
-    setTestImage((current) => {
-      if (current?.url) URL.revokeObjectURL(current.url)
-      return { url, name: file.name }
-    })
-    setTestStatus(`已收到测试图：${file.name}`)
-  }
-
-  return (
-    <ScrollArea className="h-full">
-      <div className="mx-auto max-w-4xl space-y-5 p-5">
-        <div>
-          <h3 className="text-base font-semibold">单项检查</h3>
-          <p className="mt-1 text-xs text-muted-foreground">不修改项目、不建立队列；只把一条真实制作说明交给正式提示词解析器，检查最终 Prompt。</p>
-        </div>
-        <Card>
-          <CardHeader className="pb-3"><SectionHeading title="解析条件" description={projectName ? `当前项目：${projectName}` : "请先在主窗口选择项目"} /></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="space-y-2"><Label>制作风格</Label><Select value={style} onValueChange={setStyle}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{STYLES.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-2"><Label>资产类型</Label><Select value={asset} onValueChange={setAsset}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ASSETS.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-2"><Label>参考图方式</Label><Select value={referenceMode} onValueChange={setReferenceMode}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{REFERENCE_MODES.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent></Select></div>
-            </div>
-            <div className="space-y-2"><Label htmlFor="validation-asset-id">资产 ID / 名称</Label><Input id="validation-asset-id" value={assetId} onChange={(event) => setAssetId(event.target.value)} placeholder="例如：SCENE-014 · 雨林遗迹" /></div>
-            <div className="space-y-2"><Label htmlFor="validation-production-notes">完整制作说明</Label><Textarea id="validation-production-notes" rows={6} value={productionNotes} onChange={(event) => setProductionNotes(event.target.value)} placeholder="粘贴 Excel 中这一项的完整制作说明；系统会据此解析基础路由和正式提示词。" /></div>
-            <div className="flex justify-end"><Button onClick={() => void validateOne()} disabled={loading || !productionNotes.trim()}>{loading ? <LoaderCircle className="animate-spin" /> : <TestTube2 />}校验解析</Button></div>
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,.65fr)] xl:items-start">
-          <Card>
-            <CardHeader className="pb-3"><SectionHeading title="最终 Prompt" description={result ? `${assetId || "未填写资产名"} · ${result.promptFields.length} 个固定字段` : "完成解析后集中显示全部字段"} action={<div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => result && navigator.clipboard.writeText(formatPromptText(result)).then(() => notify("最终 Prompt 已复制")).catch(() => notify("复制失败", "error"))} disabled={!result}><ClipboardCopy />复制</Button><Button size="sm" onClick={() => void prepareImageTest()} disabled={!result}><Sparkles />出图测试</Button></div>} /></CardHeader>
-            <CardContent className="space-y-3">
-              {result && <details className="group overflow-hidden rounded-lg border bg-muted/10"><summary className="flex h-9 cursor-pointer list-none items-center gap-2 px-3 text-xs font-medium outline-none hover:bg-accent/45 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden"><ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />本次解析轨迹<Badge variant="success" className="ml-auto">正式注册表</Badge></summary><div className="flex flex-wrap gap-2 border-t px-3 py-2.5">{makeRouteTrace(result).map((item: string) => <Badge key={item} variant="outline" className="font-mono text-[10px]">{item}</Badge>)}</div></details>}
-              <PromptFieldList idPrefix="validation-field" fields={(result?.promptFields ?? []) as { label: string; value: string }[]} emptyMessage="填写制作说明并点击“校验解析”，这里会显示真实最终 Prompt" />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3"><SectionHeading title="图片返回窗口" description={testStatus} /></CardHeader>
-            <CardContent>
-              <input ref={testImageInputRef} type="file" accept="image/*" className="sr-only" aria-label="上传单项测试参考图" onChange={(event) => event.target.files?.[0] && receiveTestImage(event.target.files[0])} />
-              <button type="button" onClick={() => testImageInputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) receiveTestImage(file) }} className="grid aspect-square min-h-64 w-full place-items-center overflow-hidden rounded-xl border border-dashed bg-muted/15 text-muted-foreground transition-colors hover:border-primary/45 hover:bg-primary/5">
-                {testImage ? <img src={testImage.url} alt={testImage.name} className="size-full object-contain" /> : <span className="px-5 text-center text-xs"><ImagePlus className="mx-auto mb-2 size-6" />生成后将图片拖到这里，或点击选择返回图片</span>}
-              </button>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </ScrollArea>
   )
 }
