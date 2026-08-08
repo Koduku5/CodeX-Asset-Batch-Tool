@@ -34,6 +34,16 @@
 
 若这些文件继续增长，550 行总门禁会要求先抽取新的明确子域。
 
+## 本次验收结果（2026-08-08）
+
+- `npm ci` 成功，`npm audit` 为 0 个漏洞。
+- `npm run check` 整体退出码为 0。
+- Node 测试共 246 项：244 通过、0 失败、2 项因当前 Windows 环境不允许创建符号链接而跳过。
+- Python 测试共 14 项：14 通过、0 失败。
+- React/TypeScript 类型检查和 Vite 生产构建通过。
+- PowerShell 全量 AST 语法检查通过。
+- 使用官方 .NET SDK 10.0.302 编译 `PromptStudio.Desktop.csproj`：0 警告、0 错误。
+
 ## 已发现但不属于模块化的功能缺口
 
 Prompt Studio 的单条条件模块调试仍依赖宿主注入的 `promptStudioClassifierBridge.classifyConditionModule`；项目级批量分类已接入正式 Agent 流程，但单条调试没有服务端回退。后续若要统一体验，建议增加项目绑定的只读分类预览 API，并复用现有分类请求/响应契约，避免另建一套判断逻辑。
