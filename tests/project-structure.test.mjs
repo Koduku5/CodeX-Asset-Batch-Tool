@@ -85,6 +85,7 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'engine/scripts/commands/lib/api-batch-contracts.ps1',
     'engine/scripts/commands/lib/api-batch-state.ps1',
     'engine/scripts/commands/lib/api-batch-headless.ps1',
+    'engine/scripts/commands/lib/api-batch-dialog-layout.ps1',
     'engine/scripts/commands/lib/api-batch-dialog.ps1',
     'engine/scripts/commands/lib/api-batch-form.ps1',
     'engine/scripts/commands/lib/api-batch-launch.ps1',

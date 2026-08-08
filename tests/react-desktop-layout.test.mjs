@@ -521,10 +521,11 @@ test('Infinite Canvas opens both batch modes and automatically loads authenticat
   const runnerContracts = await read('engine/scripts/commands/lib/api-batch-contracts.ps1');
   const runnerState = await read('engine/scripts/commands/lib/api-batch-state.ps1');
   const runnerHeadless = await read('engine/scripts/commands/lib/api-batch-headless.ps1');
+  const runnerDialogLayout = await read('engine/scripts/commands/lib/api-batch-dialog-layout.ps1');
   const runnerDialog = await read('engine/scripts/commands/lib/api-batch-dialog.ps1');
   const runnerForm = await read('engine/scripts/commands/lib/api-batch-form.ps1');
   const runnerLaunch = await read('engine/scripts/commands/lib/api-batch-launch.ps1');
-  const runnerSource = [runner, runnerContracts, runnerState, runnerHeadless, runnerDialog, runnerForm, runnerLaunch].join('\n');
+  const runnerSource = [runner, runnerContracts, runnerState, runnerHeadless, runnerDialogLayout, runnerDialog, runnerForm, runnerLaunch].join('\n');
 
   assert.match(app, /连接账号并读取项目 \/ 模型/u);
   assert.match(app, /const loadCatalog = window\.kaDesktopBridge\?\.loadApiCatalog/u);
