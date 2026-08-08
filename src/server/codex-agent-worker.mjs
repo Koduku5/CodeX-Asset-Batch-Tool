@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { lstat, readFile, realpath } from 'node:fs/promises';
-import { basename, isAbsolute, join, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isAbsolute, join, relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import {
   createPromptBranchClassificationSession,
@@ -26,8 +25,22 @@ import {
   resultSchema,
   visualSpecResultSchema
 } from './codex-agent/contracts.mjs';
+import {
+  publicSkillReceipt,
+  SOFTWARE_EPISODE_ASSET_SKILL_PATH,
+  SOFTWARE_PIPELINE_SKILL_PATH,
+  inspectSoftwarePipelineSkill,
+  verifySoftwarePipelineSkill
+} from './codex-agent/software-skill-integrity.mjs';
+import {
+  CodexAgentWorkerError,
+  sanitizeAgentText,
+  workerError
+} from './codex-agent/worker-errors.mjs';
 
 export { readCodexModelLabel } from './codex-runtime-config.mjs';
+export { CodexAgentWorkerError, sanitizeAgentText };
+export { SOFTWARE_EPISODE_ASSET_SKILL_PATH, SOFTWARE_PIPELINE_SKILL_PATH };
 
 export const CODEX_AGENT_ACTIONS = Object.freeze([
   'analyze-screenplay',
@@ -38,8 +51,6 @@ export const CODEX_AGENT_ACTIONS = Object.freeze([
 
 const ACTIONS = new Set(CODEX_AGENT_ACTIONS);
 const MAX_PROGRESS_EVENTS = 512;
-const MAX_PIPELINE_SKILL_BYTES = 1024 * 1024;
-const MAX_EPISODE_ASSET_SKILL_BYTES = 256 * 1024;
 const MAX_ANALYSIS_PROGRESS_BYTES = 4 * 1024 * 1024;
 const MAX_ANALYSIS_RESULT_BYTES = 1024 * 1024;
 const MAX_ASSET_REGISTRY_BYTES = 16 * 1024 * 1024;
@@ -49,12 +60,6 @@ const ASSET_REGISTRY_FILES = Object.freeze({
   props: '道具记录.json'
 });
 const DEFAULT_NETWORK_RETRY_LIMIT = 3;
-export const SOFTWARE_PIPELINE_SKILL_PATH = fileURLToPath(
-  new URL('../../skills/ka-script-pipeline/SKILL.md', import.meta.url)
-);
-export const SOFTWARE_EPISODE_ASSET_SKILL_PATH = fileURLToPath(
-  new URL('../../skills/ka-episode-asset-analysis/SKILL.md', import.meta.url)
-);
 const DEFAULT_TIMEOUTS = Object.freeze({
   'analyze-screenplay': Object.freeze({ total: 2 * 60 * 60 * 1000, idle: 8 * 60 * 1000 }),
   'build-world-overview': Object.freeze({ total: 60 * 60 * 1000, idle: 8 * 60 * 1000 }),
@@ -73,17 +78,6 @@ const promptForAnalysisEpisode = (episode, pipelineSkill) => analysisPrompt({
   episodeFile: `cache/单集原文/第${String(episode).padStart(3, '0')}集.json`,
   episodeSkillPath: pipelineSkill.episodeAssetSkillPath
 });
-
-export class CodexAgentWorkerError extends Error {
-  constructor(code, message, cause = null) {
-    super(message);
-    this.name = 'CodexAgentWorkerError';
-    this.code = code;
-    this.cause = cause;
-  }
-}
-
-const workerError = (code, message, cause = null) => new CodexAgentWorkerError(code, message, cause);
 
 const exactInput = (input) => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -218,109 +212,6 @@ const verifyEpisodeCommit = (before, after, episode) => {
   if (newlyCompleted.length !== 1 || newlyCompleted[0] !== episode || after.currentEpisode !== null) {
     throw workerError('ANALYSIS_EPISODE_NOT_COMMITTED', `第 ${episode} 集未完成原子累计与完成标记`);
   }
-};
-
-const inspectSoftwarePipelineSkill = async (pipelineSkillPathInput) => {
-  if (typeof pipelineSkillPathInput !== 'string' || !isAbsolute(pipelineSkillPathInput)) {
-    throw workerError('SKILL_UNAVAILABLE', '软件级 ka-script-pipeline 执行规范路径无效');
-  }
-  const configuredPath = resolve(pipelineSkillPathInput);
-  const configuredRoot = resolve(configuredPath, '..');
-  const configuredSkillsRoot = resolve(configuredRoot, '..');
-  const configuredEpisodeAssetRoot = join(configuredSkillsRoot, 'ka-episode-asset-analysis');
-  const configuredEpisodeAssetSkillPath = join(configuredEpisodeAssetRoot, 'SKILL.md');
-  if (basename(configuredPath).toLowerCase() !== 'skill.md'
-    || basename(configuredRoot).toLowerCase() !== 'ka-script-pipeline') {
-    throw workerError('SKILL_UNAVAILABLE', '软件级 ka-script-pipeline 执行规范路径无效');
-  }
-  try {
-    const [rootInfo, skillInfo, episodeAssetRootInfo, episodeAssetSkillInfo] = await Promise.all([
-      lstat(configuredRoot),
-      lstat(configuredPath),
-      lstat(configuredEpisodeAssetRoot),
-      lstat(configuredEpisodeAssetSkillPath)
-    ]);
-    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('unsafe skill directory');
-    if (!skillInfo.isFile() || skillInfo.isSymbolicLink()) throw new Error('unsafe skill file');
-    if (!episodeAssetRootInfo.isDirectory() || episodeAssetRootInfo.isSymbolicLink()) {
-      throw new Error('unsafe episode asset skill directory');
-    }
-    if (!episodeAssetSkillInfo.isFile() || episodeAssetSkillInfo.isSymbolicLink()) {
-      throw new Error('unsafe episode asset skill file');
-    }
-    if (skillInfo.size <= 0 || skillInfo.size > MAX_PIPELINE_SKILL_BYTES) throw new Error('invalid skill size');
-    if (episodeAssetSkillInfo.size <= 0 || episodeAssetSkillInfo.size > MAX_EPISODE_ASSET_SKILL_BYTES) {
-      throw new Error('invalid episode asset skill size');
-    }
-    const [canonicalSkillsRoot, canonicalRoot, canonicalPath, canonicalEpisodeAssetRoot, canonicalEpisodeAssetSkillPath] = await Promise.all([
-      realpath(configuredSkillsRoot),
-      realpath(configuredRoot),
-      realpath(configuredPath),
-      realpath(configuredEpisodeAssetRoot),
-      realpath(configuredEpisodeAssetSkillPath)
-    ]);
-    if (isOutside(canonicalSkillsRoot, canonicalRoot) || isOutside(canonicalSkillsRoot, canonicalEpisodeAssetRoot)) {
-      throw new Error('software skill escapes skills directory');
-    }
-    if (isOutside(canonicalRoot, canonicalPath)) throw new Error('skill file escapes software skill directory');
-    if (isOutside(canonicalEpisodeAssetRoot, canonicalEpisodeAssetSkillPath)) {
-      throw new Error('episode asset skill file escapes software skill directory');
-    }
-    const [content, episodeAssetSkillContent] = await Promise.all([
-      readFile(canonicalPath),
-      readFile(canonicalEpisodeAssetSkillPath)
-    ]);
-    if (content.length !== skillInfo.size || episodeAssetSkillContent.length !== episodeAssetSkillInfo.size) {
-      throw new Error('skill changed while being inspected');
-    }
-    const sha256 = createHash('sha256')
-      .update('ka-script-pipeline/SKILL.md\0').update(content)
-      .update('\0ka-episode-asset-analysis/SKILL.md\0').update(episodeAssetSkillContent)
-      .digest('hex');
-    return Object.freeze({
-      id: 'ka-script-pipeline',
-      configuredPath,
-      root: canonicalRoot,
-      path: canonicalPath,
-      episodeAssetSkillRoot: canonicalEpisodeAssetRoot,
-      episodeAssetSkillPath: canonicalEpisodeAssetSkillPath,
-      fileIdentity: `${skillInfo.dev}:${skillInfo.ino}|${episodeAssetSkillInfo.dev}:${episodeAssetSkillInfo.ino}`,
-      sha256,
-    });
-  } catch (error) {
-    throw workerError('SKILL_UNAVAILABLE', '软件级 ka-script-pipeline 执行规范不可用', error);
-  }
-};
-
-const verifySoftwarePipelineSkill = async (snapshot) => {
-  const current = await inspectSoftwarePipelineSkill(snapshot.configuredPath);
-  if (current.fileIdentity !== snapshot.fileIdentity || current.sha256 !== snapshot.sha256) {
-    throw workerError('SKILL_CHANGED', '软件级 ka-script-pipeline 执行规范在任务期间发生变化');
-  }
-};
-
-const publicSkillReceipt = (snapshot) => Object.freeze({
-  id: snapshot.id,
-  sha256: snapshot.sha256
-});
-
-const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-
-export const sanitizeAgentText = (value, projectRoot = '') => {
-  let text = String(value ?? '')
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, '')
-    .replace(/\r\n?/gu, '\n')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, ' ');
-  if (projectRoot) text = text.replace(new RegExp(escapeRegExp(projectRoot), 'giu'), '[project]');
-  return text
-    .replace(/\b(authorization\s*:\s*bearer)\s+[^\s]+/giu, '$1 [redacted]')
-    .replace(/\b((?:openai[-_ ]?|codex[-_ ]?)?api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|credential|secret)\s*[:=]\s*[^\s,;]+/giu, '$1=[redacted]')
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gu, '[redacted]')
-    .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\s"'<>|]*/gu, '[path]')
-    .replace(/(?:^|\s)\/(?:[^\s"'<>/]+\/)*[^\s"'<>/]*/gmu, (match) => `${match.startsWith(' ') ? ' ' : ''}[path]`)
-    .replace(/\b(?:input|output|cached|reasoning)?_?tokens?\s*[:=]\s*\d+\b/giu, '[usage omitted]')
-    .trim()
-    .slice(0, 500);
 };
 
 const boundedTimeout = (value, fallback, label) => {
