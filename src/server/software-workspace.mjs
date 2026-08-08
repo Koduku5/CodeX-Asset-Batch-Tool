@@ -3,7 +3,6 @@ import {
   lstat,
   mkdir,
   open,
-  readFile,
   readdir,
   realpath,
   rename,
@@ -34,6 +33,11 @@ import {
   samePath
 } from './software-workspace/path-safety.mjs';
 import {
+  readProjectMetadata,
+  toPublicProject,
+  writeProjectMetadataAtomically
+} from './software-workspace/project-metadata.mjs';
+import {
   SHARED_ASSETS_MANIFEST_FILENAME,
   buildTreeManifest,
   copySafeTree,
@@ -61,59 +65,6 @@ const DEFAULT_MAX_PROJECTS = 128;
 const DEFAULT_MAX_DISPLAY_NAME_LENGTH = 80;
 const DEFAULT_MAX_RUNTIME_FILES = 50_000;
 const DEFAULT_MAX_RUNTIME_BYTES = 2 * 1024 * 1024 * 1024;
-const readProjectMetadata = async (projectRoot, expectedProjectId, maximumDisplayNameLength) => {
-  const metadataPath = join(projectRoot, 'project.json');
-  await assertPlainExistingEntry(metadataPath, `项目 ${expectedProjectId} 的 project.json`, 'file');
-  let value;
-  try {
-    value = JSON.parse(await readFile(metadataPath, 'utf8'));
-  } catch (error) {
-    fail('INVALID_PROJECT_METADATA', `项目 ${expectedProjectId} 的 project.json 无法读取`, error);
-  }
-  if (
-    value === null ||
-    typeof value !== 'object' ||
-    Array.isArray(value) ||
-    value.schemaVersion !== SOFTWARE_WORKSPACE_SCHEMA_VERSION ||
-    value.projectId !== expectedProjectId ||
-    typeof value.createdAt !== 'string' ||
-    !Number.isFinite(Date.parse(value.createdAt))
-  ) {
-    fail('INVALID_PROJECT_METADATA', `项目 ${expectedProjectId} 的 project.json 字段无效`);
-  }
-  const displayName = validateDisplayName(value.displayName, maximumDisplayNameLength);
-  return {
-    metadata: {
-      schemaVersion: SOFTWARE_WORKSPACE_SCHEMA_VERSION,
-      projectId: expectedProjectId,
-      displayName,
-      createdAt: value.createdAt
-    },
-    document: value
-  };
-};
-
-const writeProjectMetadataAtomically = async (softwareRoot, projectRoot, metadata) => {
-  const metadataPath = join(projectRoot, 'project.json');
-  const stagePath = join(projectRoot, `.project-${randomUUID()}.json`);
-  assertPathInside(softwareRoot, metadataPath, `项目 ${metadata.projectId} 的 project.json`);
-  assertPathInside(softwareRoot, stagePath, `项目 ${metadata.projectId} 的 project.json 临时文件`);
-  await assertSafeTargetChain(softwareRoot, projectRoot, `项目 ${metadata.projectId}`);
-  await assertPlainExistingEntry(metadataPath, `项目 ${metadata.projectId} 的 project.json`, 'file');
-  try {
-    await writeFile(stagePath, `${JSON.stringify(metadata, null, 2)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600
-    });
-    await assertSafeTargetChain(softwareRoot, projectRoot, `项目 ${metadata.projectId}`);
-    await assertPlainExistingEntry(metadataPath, `项目 ${metadata.projectId} 的 project.json`, 'file');
-    await rename(stagePath, metadataPath);
-  } finally {
-    await rm(stagePath, { force: true }).catch(() => {});
-  }
-};
-
 const assertTreeHasNoReparsePoints = async (root, label, depth = 0) => {
   if (depth > 64) fail('PROJECT_TREE_TOO_DEEP', `${label} 的目录层级超过限制`);
   const info = await assertPlainExistingEntry(root, label);
@@ -125,14 +76,6 @@ const assertTreeHasNoReparsePoints = async (root, label, depth = 0) => {
     await assertTreeHasNoReparsePoints(join(root, entry), `${label}/${entry}`, depth + 1);
   }
 };
-
-const toPublicProject = (metadata, projectRoot) => Object.freeze({
-  ...metadata,
-  projectRoot,
-  screenplayRoot: join(projectRoot, '剧本'),
-  cacheRoot: join(projectRoot, 'cache'),
-  outputRoot: join(projectRoot, '输出')
-});
 
 const writeAll = async (handle, bytes) => {
   let offset = 0;
