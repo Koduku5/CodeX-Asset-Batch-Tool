@@ -419,6 +419,7 @@ npm run build:installer
 补充文档：
 
 - `docs/PROJECT-STRUCTURE.md`：目录所有权与新代码放置规则。
+- `docs/MODULARIZATION-AUDIT.md`：模块化完成标准、自动门禁和保留长模块说明。
 - `docs/DESKTOP-BRIDGE.md`：桌面令牌和 RPC 安全边界。
 - `desktop/README.md`：WPF/WebView2 生命周期与发布布局。
 - `skills/*/references/`：对应 Skill 在运行期必须读取的补充协议。

@@ -38,7 +38,10 @@
 - `npm run check:server`：检查 Node 领域模块、门面与适配器语法。
 - `npm run typecheck` 与 `npm run build`：验证 React/TypeScript 和生产 bundle。
 - `npm test`：验证服务、流水线、UI、桌面、安全、打包与性能契约。
+- `tests/modular-architecture.test.mjs`：限制源码和公开入口厚度，并阻止领域模块反向依赖兼容门面。
 - `npm run check:desktop`：在安装 .NET 10 SDK 的开发机或 CI 中编译 WPF 宿主。
+
+完整完成标准、领域分区和长模块说明见 `docs/MODULARIZATION-AUDIT.md`。
 
 ## 禁止事项
 
