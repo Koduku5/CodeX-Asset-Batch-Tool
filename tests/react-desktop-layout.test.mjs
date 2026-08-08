@@ -27,6 +27,7 @@ const readWorkbenchSource = async () => (await Promise.all([
   read('src/ui/features/workbench/use-workbench-codex.ts'),
   read('src/ui/features/workbench/use-workbench-projects.ts'),
   read('src/ui/features/workbench/use-workbench-stage-timings.ts'),
+  read('src/ui/features/workbench/use-workbench-tasks.ts'),
   read('src/ui/features/workbench/workbench-status-bar.tsx'),
   read('src/ui/features/workbench/workbench-project-panel.tsx'),
   read('src/ui/features/workbench/workbench-pipeline-overview.tsx'),
@@ -192,6 +193,7 @@ test('workbench separates Agent chat and project dialogs from shared foundation 
   const codexController = await read('src/ui/features/workbench/use-workbench-codex.ts');
   const projectController = await read('src/ui/features/workbench/use-workbench-projects.ts');
   const stageTimings = await read('src/ui/features/workbench/use-workbench-stage-timings.ts');
+  const taskController = await read('src/ui/features/workbench/use-workbench-tasks.ts');
 
   assert.match(app, /from "@\/features\/workbench\/agent-chat-card"/u);
   assert.match(app, /<WorkbenchProjectPanel/u);
@@ -203,8 +205,9 @@ test('workbench separates Agent chat and project dialogs from shared foundation 
   assert.match(app, /useWorkbenchCodex\(\{/u);
   assert.match(app, /useWorkbenchProjects\(\{/u);
   assert.match(app, /useWorkbenchStageTimings\(\{/u);
+  assert.match(app, /useWorkbenchTasks\(\{/u);
   assert.doesNotMatch(foundation, /function AgentChatCard|Agent 输入配置与发送/u);
-  assert.doesNotMatch(app, /<Dialog open=|<AlertDialog open=|<Progress|id="active-task-log"|Codex SDK 授权状态检测|title="项目任务"|saveStageTimingsWithRetry|stageTimingSaveQueues|codexAgentChatAdapter|watchedAgentChatIds|workspaceAdapter\.listProjects|controlAdapter\.createProject/u);
+  assert.doesNotMatch(app, /<Dialog open=|<AlertDialog open=|<Progress|id="active-task-log"|Codex SDK 授权状态检测|title="项目任务"|saveStageTimingsWithRetry|stageTimingSaveQueues|codexAgentChatAdapter|watchedAgentChatIds|workspaceAdapter\.listProjects|controlAdapter\.createProject|controlAdapter\.getTask|controlAdapter\.listTasks/u);
   assert.match(agentChat, /export function AgentChatCard/u);
   assert.match(pipelineOverview, /export function WorkbenchPipelineOverview/u);
   assert.match(projectPanel, /export function WorkbenchProjectPanel/u);
@@ -215,6 +218,7 @@ test('workbench separates Agent chat and project dialogs from shared foundation 
   assert.match(codexController, /export function useWorkbenchCodex[\s\S]*codexStatusAdapter\.startLogin\(\)[\s\S]*codexAgentChatAdapter\.sendMessage/u);
   assert.match(projectController, /export function useWorkbenchProjects[\s\S]*workspaceAdapter\.listProjects\(\)[\s\S]*controlAdapter\.createProject/u);
   assert.match(stageTimings, /export function useWorkbenchStageTimings[\s\S]*saveStageTimingsWithRetry/u);
+  assert.match(taskController, /export function useWorkbenchTasks[\s\S]*controlAdapter\.getTask[\s\S]*controlAdapter\.listTasks/u);
 });
 
 test('pipeline summary follows title, screenplay, total progress, visual detail, then six stage cards', async () => {

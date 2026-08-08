@@ -26,6 +26,7 @@ import { WorkbenchTaskActivity } from "@/features/workbench/workbench-task-activ
 import { useWorkbenchCodex } from "@/features/workbench/use-workbench-codex"
 import { useWorkbenchProjects } from "@/features/workbench/use-workbench-projects"
 import { useWorkbenchStageTimings } from "@/features/workbench/use-workbench-stage-timings"
+import { useWorkbenchTasks } from "@/features/workbench/use-workbench-tasks"
 
 import {
   JsonRecord,
@@ -34,9 +35,7 @@ import {
   PHASE_LABELS,
   CURRENT_STAGE_LABELS,
   TASK_STAGE_BY_ACTION,
-  ACTIVE_TASK_STATUSES,
   safeMessage,
-  taskFailureSummary,
   percent,
 } from "@/features/workbench/workbench-foundation"
 
@@ -52,15 +51,11 @@ export default function App() {
   const [drawerTab, setDrawerTab] = React.useState("batch")
   const [pendingAssetDialogOpen, setPendingAssetDialogOpen] = React.useState(false)
   const [busyAction, setBusyAction] = React.useState<string | null>(null)
-  const [tasks, setTasks] = React.useState<Record<string, JsonRecord>>({})
-  const [taskLogOpen, setTaskLogOpen] = React.useState(false)
-  const [dismissedFailureTaskIds, setDismissedFailureTaskIds] = React.useState<string[]>([])
   const [toast, setToast] = React.useState<ToastState | null>(null)
   const toastSequence = React.useRef(0)
   const drawerPhase = React.useRef<"closed" | "opening" | "open" | "closing">("closed")
   const drawerReturnFocus = React.useRef<HTMLElement | null>(null)
   const batchStudioButtonRef = React.useRef<HTMLButtonElement>(null)
-  const watchedTaskIds = React.useRef(new Set<string>())
   const promptedPendingStates = React.useRef(new Set<string>())
 
   const notify = React.useCallback((message: string, tone: ToastState["tone"] = "good") => {
@@ -104,10 +99,22 @@ export default function App() {
     snapshot,
   } = useWorkbenchProjects({ drawerOpen, notify, setBusyAction })
 
-  const activeTask = activeProjectId ? tasks[activeProjectId] ?? null : null
-  const activeProjectHasRunningTask = ACTIVE_TASK_STATUSES.has(String(activeTask?.status))
-  const activeTaskActuallyRunning = ["running", "pausing"].includes(String(activeTask?.status))
-    && Number.isFinite(Date.parse(String(activeTask?.startedAt ?? "")))
+  const {
+    activeProjectHasRunningTask,
+    activeTask,
+    activeTaskActuallyRunning,
+    copyTaskLog,
+    dismissedFailureTaskIds,
+    pauseCurrentTask,
+    recordProjectTask,
+    removeProjectTask,
+    setDismissedFailureTaskIds,
+    setTaskLogOpen,
+    taskLogOpen,
+    tasks,
+    watchTask,
+  } = useWorkbenchTasks({ activeProjectId, notify, refreshProjects, setBusyAction })
+
   const rawPipelinePhase = snapshot?.pipeline?.phase ?? activeProject?.statusSummary?.phase ?? "split"
   const activeTaskStageId = activeProjectHasRunningTask
     ? activeTask?.action === "run-full-pipeline" || activeTask?.action === "build-scoped-workbook"
@@ -153,13 +160,9 @@ export default function App() {
   } = useWorkbenchCodex({ activeProjectHasRunningTask, activeProjectId, notify })
 
   const removeDeletedProjectState = React.useCallback((projectId: string) => {
-    setTasks((items) => {
-      const next = { ...items }
-      delete next[projectId]
-      return next
-    })
+    removeProjectTask(projectId)
     removeProjectStageTimings(projectId)
-  }, [removeProjectStageTimings])
+  }, [removeProjectStageTimings, removeProjectTask])
 
   React.useEffect(() => {
     void checkCodexStatus({ quiet: true })
@@ -167,7 +170,6 @@ export default function App() {
   }, [checkCodexStatus, refreshCodexRuntimeConfig])
 
   React.useEffect(() => {
-    setTaskLogOpen(false)
     setPendingAssetDialogOpen(false)
   }, [activeTask?.taskId])
 
@@ -252,27 +254,6 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [drawerOpen, setStudioOpen])
 
-  const watchTask = React.useCallback(async (projectId: string, task: JsonRecord) => {
-    if (watchedTaskIds.current.has(task.taskId)) return
-    watchedTaskIds.current.add(task.taskId)
-    let current = task
-    try {
-      while (ACTIVE_TASK_STATUSES.has(String(current.status))) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1000))
-        current = await controlAdapter.getTask({ projectId, taskId: current.taskId })
-        setTasks((items) => ({ ...items, [projectId]: current }))
-      }
-      if (current.status === "succeeded") notify("任务已完成", "good")
-      else if (current.status === "paused") notify("任务已暂停，可以重新开始流水线", "warning")
-      else notify(`任务执行失败：${taskFailureSummary(current)}`, "error")
-      await refreshProjects(true)
-    } catch (error) {
-      notify(safeMessage(error, "任务状态跟踪中断，请刷新后重试"), "error")
-    } finally {
-      watchedTaskIds.current.delete(task.taskId)
-    }
-  }, [notify, refreshProjects])
-
   const runTask = React.useCallback(async (
     action: string,
     workbookScope: {
@@ -281,7 +262,7 @@ export default function App() {
       workbookAssetTypes?: string[]
     } = {},
   ) => {
-    if (!activeProjectId || ACTIVE_TASK_STATUSES.has(String(activeTask?.status))) return false
+    if (!activeProjectId || activeProjectHasRunningTask) return false
     setBusyAction(action)
     try {
       const savedProjectTiming = await getProjectStageTimings(activeProjectId)
@@ -300,7 +281,7 @@ export default function App() {
       if (!resumesInterruptedRun && ["run-full-pipeline", "build-scoped-workbook", "analyze-screenplay", "split"].includes(action)) {
         resetProjectStageTimings(activeProjectId)
       }
-      setTasks((items) => ({ ...items, [activeProjectId]: task }))
+      recordProjectTask(activeProjectId, task)
       notify("任务已进入当前项目的独立队列")
       void watchTask(activeProjectId, task)
       return true
@@ -310,26 +291,7 @@ export default function App() {
     } finally {
       setBusyAction(null)
     }
-  }, [activeProject?.statusSummary?.phase, activeProjectId, activeTask?.status, getProjectStageTimings, notify, resetProjectStageTimings, snapshot?.pipeline?.phase, watchTask])
-
-  const pauseCurrentTask = React.useCallback(async () => {
-    if (!activeProjectId || !activeTask?.taskId || !["queued", "running"].includes(activeTask.status)) return false
-    setBusyAction("pause-task")
-    try {
-      const paused = await controlAdapter.pauseTask({ projectId: activeProjectId, taskId: activeTask.taskId })
-      setTasks((items) => ({ ...items, [activeProjectId]: paused }))
-      setTaskLogOpen(false)
-      notify("暂停请求已发送，后台执行进程正在停止", "warning")
-      void watchTask(activeProjectId, paused)
-      await refreshProjects(true)
-      return true
-    } catch (error) {
-      notify(safeMessage(error, "暂停任务失败"), "error")
-      return false
-    } finally {
-      setBusyAction(null)
-    }
-  }, [activeProjectId, activeTask, notify, refreshProjects, watchTask])
+  }, [activeProject?.statusSummary?.phase, activeProjectHasRunningTask, activeProjectId, activeTask?.status, getProjectStageTimings, notify, recordProjectTask, resetProjectStageTimings, snapshot?.pipeline?.phase, watchTask])
 
   const confirmAgentProposal = React.useCallback(async (message: JsonRecord) => {
     const proposal = message?.proposal
@@ -359,36 +321,6 @@ export default function App() {
     }
     if (completed) markProposalConfirmed(messageId)
   }, [activeProjectHasRunningTask, confirmedAgentProposalIds, markProposalConfirmed, notify, pauseCurrentTask, refreshProjects, runTask])
-
-  React.useEffect(() => {
-    if (!activeProjectId) return
-    let cancelled = false
-    void controlAdapter.listTasks({ projectId: activeProjectId }).then(({ tasks: projectTasks }) => {
-      if (cancelled) return
-      const latest = projectTasks.at(-1) ?? null
-      setTasks((items) => {
-        const next = { ...items }
-        if (latest) next[activeProjectId] = latest
-        else delete next[activeProjectId]
-        return next
-      })
-      if (latest && ACTIVE_TASK_STATUSES.has(String(latest.status))) void watchTask(activeProjectId, latest)
-    }).catch((error) => {
-      if (!cancelled) notify(safeMessage(error, "任务历史恢复失败"), "warning")
-    })
-    return () => { cancelled = true }
-  }, [activeProjectId, notify, watchTask])
-
-  const copyTaskLog = React.useCallback(async () => {
-    const text = String(activeTask?.log?.text ?? "")
-    if (!text) return
-    try {
-      await navigator.clipboard.writeText(text)
-      notify("任务日志已复制")
-    } catch (error) {
-      notify(safeMessage(error, "任务日志复制失败"), "warning")
-    }
-  }, [activeTask?.log?.text, notify])
 
   const summary = activeProject?.statusSummary ?? {}
   const batchCounts = snapshot?.batch?.counts ?? {}
