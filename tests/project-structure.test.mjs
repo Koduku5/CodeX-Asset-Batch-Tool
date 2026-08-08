@@ -46,6 +46,7 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'src/server/codex-agent/contracts.mjs',
     'src/server/pipeline-task/action-specs.mjs',
     'src/server/pipeline-task/contracts.mjs',
+    'src/server/pipeline-task/runtime-resolution.mjs',
     'engine/scripts/lib/prompt_catalog.mjs',
     'engine/scripts/lib/prompt-catalog/core.mjs',
     'engine/scripts/lib/prompt-catalog/loader.mjs',
