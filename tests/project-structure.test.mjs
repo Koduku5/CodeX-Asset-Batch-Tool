@@ -65,6 +65,7 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'engine/scripts/lib/directory-redraw/contracts.mjs',
     'engine/scripts/lib/directory-redraw/image-signatures.mjs',
     'engine/scripts/lib/directory-redraw/queue-state.mjs',
+    'engine/scripts/lib/workbook/validation.mjs',
     'engine/scripts/lib/api_batch/__init__.py',
     'engine/scripts/lib/api_batch/image_validation.py',
     'engine/scripts/lib/api_batch/progress_store.py',
