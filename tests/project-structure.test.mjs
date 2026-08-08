@@ -27,6 +27,7 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'src/server/server.mjs',
     'src/server/server-http.mjs',
     'src/server/server-services.mjs',
+    'src/server/software-workspace/config.mjs',
     'src/server/routes/api-routes.mjs',
     'src/server/routes/api/system-api-routes.mjs',
     'src/server/routes/api/project-api-routes.mjs',

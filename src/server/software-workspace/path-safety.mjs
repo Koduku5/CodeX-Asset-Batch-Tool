@@ -1,4 +1,4 @@
-import { lstat } from 'node:fs/promises';
+import { lstat, readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { fail } from './contracts.mjs';
@@ -11,6 +11,20 @@ const normalizeComparablePath = (value) => {
 };
 
 export const samePath = (left, right) => normalizeComparablePath(left) === normalizeComparablePath(right);
+
+export const assertTreeHasNoReparsePoints = async (root, label, depth = 0) => {
+  if (depth > 64) fail('PROJECT_TREE_TOO_DEEP', `${label} 的目录层级超过限制`);
+  const info = await assertPlainExistingEntry(root, label);
+  if (info.isFile()) return;
+  if (!info.isDirectory()) {
+    fail('UNSAFE_PROJECT_ENTRY', `${label} 只能包含普通文件和目录`);
+  }
+  const entries = await readdir(root);
+  entries.sort((left, right) => left.localeCompare(right));
+  for (const entry of entries) {
+    await assertTreeHasNoReparsePoints(join(root, entry), `${label}/${entry}`, depth + 1);
+  }
+};
 
 export const isPathInside = (root, candidate, { allowRoot = false } = {}) => {
   const offset = relative(resolve(root), resolve(candidate));

@@ -8,15 +8,13 @@ import {
   rm,
   writeFile
 } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
 
 import {
   MAX_SCREENPLAY_BYTES,
   PROJECT_ID_PATTERN,
   SOFTWARE_WORKSPACE_SCHEMA_VERSION,
   SoftwareWorkspaceError,
-  assertPositiveInteger,
   fail,
   projectIdFromDisplayName,
   sanitizeScreenplayFilename,
@@ -24,6 +22,7 @@ import {
   validateProjectId
 } from './software-workspace/contracts.mjs';
 import {
+  assertTreeHasNoReparsePoints,
   assertPathInside,
   assertPlainExistingEntry,
   assertSafeTargetChain,
@@ -36,7 +35,6 @@ import {
   writeProjectMetadataAtomically
 } from './software-workspace/project-metadata.mjs';
 import {
-  SHARED_ASSETS_MANIFEST_FILENAME,
   buildTreeManifest,
   copySafeTree,
   makeLegacyPromptCatalogManifest,
@@ -49,6 +47,7 @@ import {
   prepareScreenplayImport,
   storeScreenplay
 } from './software-workspace/screenplay-import.mjs';
+import { resolveSoftwareWorkspaceConfig } from './software-workspace/config.mjs';
 
 export {
   MAX_SCREENPLAY_BYTES,
@@ -59,69 +58,12 @@ export {
   sanitizeScreenplayFilename
 };
 
-const MODULE_ROOT = dirname(fileURLToPath(import.meta.url));
-const APPLICATION_ROOT = resolve(MODULE_ROOT, '../..');
-const DEFAULT_SOFTWARE_ROOT = resolve(APPLICATION_ROOT, '.local');
-const DEFAULT_ENGINE_ROOT = resolve(APPLICATION_ROOT, 'engine');
-const DEFAULT_MAX_PROJECTS = 128;
-const DEFAULT_MAX_DISPLAY_NAME_LENGTH = 80;
-const DEFAULT_MAX_RUNTIME_FILES = 50_000;
-const DEFAULT_MAX_RUNTIME_BYTES = 2 * 1024 * 1024 * 1024;
-const assertTreeHasNoReparsePoints = async (root, label, depth = 0) => {
-  if (depth > 64) fail('PROJECT_TREE_TOO_DEEP', `${label} 的目录层级超过限制`);
-  const info = await assertPlainExistingEntry(root, label);
-  if (info.isFile()) return;
-  if (!info.isDirectory()) fail('UNSAFE_PROJECT_ENTRY', `${label} 只能包含普通文件和目录`);
-  const entries = await readdir(root);
-  entries.sort((left, right) => left.localeCompare(right));
-  for (const entry of entries) {
-    await assertTreeHasNoReparsePoints(join(root, entry), `${label}/${entry}`, depth + 1);
-  }
-};
-
 export class SoftwareWorkspace {
   #initializePromise = null;
   #projectMutations = new Set();
 
-  constructor({
-    softwareRoot = DEFAULT_SOFTWARE_ROOT,
-    engineRoot,
-    packageRoot,
-    maxProjects = DEFAULT_MAX_PROJECTS,
-    maxDisplayNameLength = DEFAULT_MAX_DISPLAY_NAME_LENGTH,
-    maxScreenplayBytes = MAX_SCREENPLAY_BYTES,
-    maxRuntimeFiles = DEFAULT_MAX_RUNTIME_FILES,
-    maxRuntimeBytes = DEFAULT_MAX_RUNTIME_BYTES,
-    clock = () => new Date()
-  } = {}) {
-    const configuredEngineRoot = engineRoot ?? packageRoot ?? DEFAULT_ENGINE_ROOT;
-    if (!isAbsolute(softwareRoot) || !isAbsolute(configuredEngineRoot)) {
-      fail('INVALID_ROOT', 'softwareRoot 和 engineRoot 必须是绝对路径');
-    }
-    this.softwareRoot = resolve(softwareRoot);
-    this.engineRoot = resolve(configuredEngineRoot);
-    if (samePath(this.softwareRoot, this.engineRoot)) {
-      fail('INVALID_ROOT', '软件数据目录不能与只读执行引擎目录相同');
-    }
-    this.maxProjects = assertPositiveInteger(maxProjects, 'maxProjects', 10_000);
-    this.maxDisplayNameLength = assertPositiveInteger(maxDisplayNameLength, 'maxDisplayNameLength', 200);
-    this.maxScreenplayBytes = assertPositiveInteger(maxScreenplayBytes, 'maxScreenplayBytes', MAX_SCREENPLAY_BYTES);
-    this.maxRuntimeFiles = assertPositiveInteger(maxRuntimeFiles, 'maxRuntimeFiles', 1_000_000);
-    this.maxRuntimeBytes = assertPositiveInteger(maxRuntimeBytes, 'maxRuntimeBytes', 16 * 1024 * 1024 * 1024);
-    if (typeof clock !== 'function') fail('INVALID_OPTION', 'clock 必须是函数');
-    this.clock = clock;
-
-    this.workspaceRoot = join(this.softwareRoot, 'workspace');
-    this.projectsRoot = join(this.workspaceRoot, 'projects');
-    this.sharedAssetsRoot = join(this.workspaceRoot, 'shared-assets');
-    this.sharedAssetsManifestPath = join(this.workspaceRoot, SHARED_ASSETS_MANIFEST_FILENAME);
-    this.paths = Object.freeze({
-      softwareRoot: this.softwareRoot,
-      engineRoot: this.engineRoot,
-      workspaceRoot: this.workspaceRoot,
-      projectsRoot: this.projectsRoot,
-      sharedAssetsRoot: this.sharedAssetsRoot
-    });
+  constructor(options = {}) {
+    Object.assign(this, resolveSoftwareWorkspaceConfig(options));
   }
 
   async initialize() {
