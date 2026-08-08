@@ -63,6 +63,7 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'engine/scripts/lib/api_batch/progress_store.py',
     'engine/scripts/lib/api_batch/canvas_layout.py',
     'engine/scripts/lib/asset_record_validation.py',
+    'engine/scripts/lib/episode_asset_merge.py',
     'engine/scripts/lib/world_delivery_validation.py',
     'packaging/build-release.ps1',
     'packaging/installer.iss',
