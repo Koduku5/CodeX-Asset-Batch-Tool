@@ -1,35 +1,17 @@
-import { lstat, realpath } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import {
-  createPromptBranchClassificationSession,
-  PromptBranchClassificationError
-} from './prompt-branch-classification.mjs';
-import {
-  codexThreadRuntimeOptions,
-  normalizeCodexRuntimeSelection,
-  readCodexModelLabel
-} from './codex-runtime-config.mjs';
-import { createCodexSdkOptions } from './codex-sdk-options.mjs';
+import { createPromptBranchClassificationSession } from './prompt-branch-classification.mjs';
+import { readCodexModelLabel } from './codex-runtime-config.mjs';
 import {
   nextAnalysisEpisode,
   normalizeAnalysisProgress,
   readAnalysisProgressFile,
   verifyEpisodeCommit
 } from './codex-agent/analysis-progress.mjs';
-import { analysisPrompt } from './codex-agent/analyze-screenplay.mjs';
-import { worldOverviewPrompt } from './codex-agent/build-world-overview.mjs';
-import {
-  classificationPagePrompt,
-  classificationPrompt
-} from './codex-agent/classify-prompt-branches.mjs';
+import { runBranchClassificationAction } from './codex-agent/branch-classification-action.mjs';
 import { visualSpecPrompt } from './codex-agent/complete-asset-visual-specs.mjs';
-import {
-  analysisSdkSchema,
-  resultSchema,
-  visualSpecResultSchema
-} from './codex-agent/contracts.mjs';
+import { resultSchema, visualSpecResultSchema } from './codex-agent/contracts.mjs';
 import { isOutside } from './codex-agent/path-safety.mjs';
 import {
   commitAnalysisEpisodeDefault,
@@ -50,154 +32,31 @@ import {
   inspectSoftwarePipelineSkill,
   verifySoftwarePipelineSkill
 } from './codex-agent/software-skill-integrity.mjs';
+import { createCodexThreadRunner } from './codex-agent/thread-runner.mjs';
 import {
   CodexAgentWorkerError,
   sanitizeAgentText,
   workerError
 } from './codex-agent/worker-errors.mjs';
+import {
+  CODEX_AGENT_ACTIONS,
+  DEFAULT_TIMEOUTS,
+  MAX_PROGRESS_EVENTS,
+  boundedRetryLimit,
+  boundedTimeout,
+  canonicalProject,
+  classifyRuntimeError,
+  exactWorkerInput,
+  loadDefaultCodex,
+  promptForAction,
+  promptForAnalysisEpisode
+} from './codex-agent/worker-runtime.mjs';
 
 export { readCodexModelLabel } from './codex-runtime-config.mjs';
 export { CodexAgentWorkerError, sanitizeAgentText };
 export { SOFTWARE_EPISODE_ASSET_SKILL_PATH, SOFTWARE_PIPELINE_SKILL_PATH };
 export { reconcileAnalysisAssetIdentities };
-
-export const CODEX_AGENT_ACTIONS = Object.freeze([
-  'analyze-screenplay',
-  'build-world-overview',
-  'complete-asset-visual-specs',
-  'classify-prompt-branches'
-]);
-
-const ACTIONS = new Set(CODEX_AGENT_ACTIONS);
-const MAX_PROGRESS_EVENTS = 512;
-const DEFAULT_NETWORK_RETRY_LIMIT = 3;
-const DEFAULT_TIMEOUTS = Object.freeze({
-  'analyze-screenplay': Object.freeze({ total: 2 * 60 * 60 * 1000, idle: 8 * 60 * 1000 }),
-  'build-world-overview': Object.freeze({ total: 60 * 60 * 1000, idle: 8 * 60 * 1000 }),
-  'complete-asset-visual-specs': Object.freeze({ total: 2 * 60 * 60 * 1000, idle: 8 * 60 * 1000 }),
-  'classify-prompt-branches': Object.freeze({ total: 2 * 60 * 60 * 1000, idle: 8 * 60 * 1000 })
-});
-
-const promptForAction = (action, pipelineSkill) => {
-  if (action === 'build-world-overview') return worldOverviewPrompt(pipelineSkill.path);
-  if (action === 'classify-prompt-branches') return classificationPrompt(pipelineSkill.path);
-  throw workerError('SKILL_UNAVAILABLE', '软件级执行规范没有绑定到固定动作');
-};
-
-const promptForAnalysisEpisode = (episode, pipelineSkill) => analysisPrompt({
-  episode,
-  episodeFile: `cache/单集原文/第${String(episode).padStart(3, '0')}集.json`,
-  episodeSkillPath: pipelineSkill.episodeAssetSkillPath
-});
-
-const exactInput = (input) => {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    throw workerError('INVALID_WORKER_INPUT', 'Agent 任务输入无效');
-  }
-  const unknown = Object.keys(input).filter((key) => !['action', 'projectRoot', 'runtimeConfig'].includes(key));
-  if (unknown.length) throw workerError('INVALID_WORKER_INPUT', 'Agent 任务包含不允许的字段');
-  if (!ACTIONS.has(input.action)) throw workerError('ACTION_NOT_ALLOWED', '不允许执行该 Agent 动作');
-  if (typeof input.projectRoot !== 'string' || !isAbsolute(input.projectRoot)) {
-    throw workerError('INVALID_PROJECT_ROOT', 'Agent 项目根无效');
-  }
-  let runtimeConfig = null;
-  if (input.runtimeConfig !== undefined) {
-    try {
-      runtimeConfig = normalizeCodexRuntimeSelection(input.runtimeConfig, { nullable: true });
-    } catch (error) {
-      throw workerError('INVALID_WORKER_INPUT', 'Agent 模型配置无效', error);
-    }
-  }
-  return { action: input.action, projectRoot: resolve(input.projectRoot), runtimeConfig };
-};
-
-const canonicalProject = async (candidate) => {
-  let info;
-  let canonical;
-  try {
-    info = await lstat(candidate);
-    canonical = await realpath(candidate);
-  } catch (error) {
-    throw workerError('PROJECT_ROOT_UNAVAILABLE', 'Agent 项目根不可用', error);
-  }
-  if (!info.isDirectory() || info.isSymbolicLink()) {
-    throw workerError('PROJECT_ROOT_UNSAFE', 'Agent 项目根不是安全的普通目录');
-  }
-  return canonical;
-};
-
-const boundedTimeout = (value, fallback, label) => {
-  const timeout = value ?? fallback;
-  if (!Number.isInteger(timeout) || timeout < 10 || timeout > 24 * 60 * 60 * 1000) {
-    throw new TypeError(`${label} must be an integer from 10 through 86400000`);
-  }
-  return timeout;
-};
-
-const boundedRetryLimit = (value) => {
-  const limit = value ?? DEFAULT_NETWORK_RETRY_LIMIT;
-  if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
-    throw new TypeError('networkRetryLimit must be an integer from 1 through 10');
-  }
-  return limit;
-};
-
-const loadDefaultCodex = async () => {
-  let module;
-  try {
-    module = await import('@openai/codex-sdk');
-  } catch (error) {
-    throw workerError('CODEX_SDK_UNAVAILABLE', 'Codex SDK 未安装或无法载入', error);
-  }
-  if (typeof module.Codex !== 'function') {
-    throw workerError('CODEX_SDK_UNAVAILABLE', 'Codex SDK 运行时不完整');
-  }
-  try {
-    return new module.Codex(createCodexSdkOptions());
-  } catch (error) {
-    throw workerError('CODEX_RUNTIME_UNAVAILABLE', 'Codex 本地运行时不可用', error);
-  }
-};
-
-const classifyRuntimeError = (error) => {
-  if (error instanceof CodexAgentWorkerError) return error;
-  if (error instanceof PromptBranchClassificationError) return workerError(error.code, error.message, error);
-  const message = String(error?.message || 'Codex Agent 运行失败');
-  if (/auth|log[ -]?in|sign[ -]?in|unauthori[sz]ed|forbidden|\b401\b|\b403\b/iu.test(message)) {
-    return workerError('CODEX_AUTH_UNAVAILABLE', 'Codex 尚未登录或认证不可用', error);
-  }
-  if (/spawn|executable|binary|runtime|ENOENT/iu.test(message)) {
-    return workerError('CODEX_RUNTIME_UNAVAILABLE', 'Codex 本地运行时不可用', error);
-  }
-  return workerError('CODEX_AGENT_FAILED', 'Codex Agent 执行失败', error);
-};
-
-const safeEventMessage = (event) => {
-  if (event?.type === 'thread.started') return 'Codex Agent 新会话已建立';
-  if (event?.type === 'turn.started') return 'Codex Agent 已开始执行固定动作';
-  if (event?.type === 'turn.completed') return 'Codex Agent 已完成本轮执行';
-  if (event?.type !== 'item.completed') return null;
-  const item = event.item;
-  if (item?.type === 'command_execution') {
-    if (item.status === 'failed') return '正式流水线命令执行失败';
-    const command = String(item.command || '');
-    if (/update_analysis_progress\.mjs/iu.test(command)) return '当前集分析进度已更新';
-    if (/query_asset_records\.py/iu.test(command)) return '当前集候选资产记录已读取';
-    if (/sync_episode_analysis\.py/iu.test(command)) return '当前集分析结果已累计保存';
-    if (/page_world_records\.py/iu.test(command)) return '世界观事实分页已读取';
-    if (/finalize_world_overview\.py/iu.test(command)) return '世界观总览已完成正式校验';
-    return null;
-  }
-  if (item?.type === 'file_change') {
-    const count = Array.isArray(item.changes) ? item.changes.length : 0;
-    return `项目状态文件已更新（${Math.min(count, 999)} 项）`;
-  }
-  if (item?.type === 'mcp_tool_call') {
-    return item.status === 'failed' ? '必需工具调用失败' : '必需工具调用已完成';
-  }
-  if (item?.type === 'error') return 'Codex Agent 报告执行错误';
-  return null;
-};
+export { CODEX_AGENT_ACTIONS };
 
 export async function runCodexAgentAction(input, {
   createCodex = loadDefaultCodex,
@@ -223,7 +82,7 @@ export async function runCodexAgentAction(input, {
     || typeof emit !== 'function') {
     throw new TypeError('worker dependencies must be functions');
   }
-  const request = exactInput(input);
+  const request = exactWorkerInput(input);
   const projectRoot = await canonicalProject(request.projectRoot);
   const pipelineSkill = await inspectSoftwarePipelineSkill(pipelineSkillPath);
   if (!isOutside(projectRoot, pipelineSkill.path)
@@ -297,140 +156,16 @@ export async function runCodexAgentAction(input, {
     }
   };
 
-  const runThread = async ({
-    codex, prompt, outputSchema, sandboxMode, strictClassification = false, strictAnalysis = false,
-    strictVisualSpec = false
-  }) => {
-    if (abortError) throw abortError;
-    let thread;
-    try {
-      thread = codex.startThread({
-        workingDirectory: projectRoot,
-        skipGitRepoCheck: true,
-        sandboxMode,
-        networkAccessEnabled: false,
-        webSearchMode: 'disabled',
-        approvalPolicy: 'never',
-        ...codexThreadRuntimeOptions(request.runtimeConfig ?? { model: null, reasoningEffort: null })
-      });
-    } catch (error) {
-      throw classifyRuntimeError(error);
-    }
-    if (!thread || typeof thread.runStreamed !== 'function') {
-      throw workerError('CODEX_SDK_UNAVAILABLE', 'Codex SDK thread 不可用');
-    }
-    let streamed;
-    try {
-      streamed = await thread.runStreamed(prompt, {
-        outputSchema: strictAnalysis || strictVisualSpec ? analysisSdkSchema(outputSchema) : outputSchema,
-        signal: controller.signal
-      });
-    } catch (error) {
-      throw classifyRuntimeError(error);
-    }
-    if (abortError) throw abortError;
-    if (!streamed?.events || typeof streamed.events[Symbol.asyncIterator] !== 'function') {
-      throw workerError('CODEX_SDK_UNAVAILABLE', 'Codex SDK 未返回事件流');
-    }
-    let finalMessage = '';
-    let turnCompleted = false;
-    let lastStreamError = '';
-    let lastItemError = '';
-    let lastAnalysisCommandError = '';
-    let networkRetryCount = 0;
-    try {
-      for await (const event of streamed.events) {
-        if (abortError) throw abortError;
-        if (event?.type === 'error') {
-          lastStreamError = String(event.message || 'Codex stream failed');
-          networkRetryCount += 1;
-          if (networkRetryCount >= retryLimit) {
-            abort(
-              'CODEX_NETWORK_RETRY_EXHAUSTED',
-              `Codex 网络重试已达到 ${retryLimit} 次上限，任务已停止，可从当前进度继续`
-            );
-            throw abortError;
-          }
-          emitProgress(`Codex Agent 连接短暂中断，正在自动重试（${networkRetryCount}/${retryLimit}）`);
-          continue;
-        }
-        resetIdleTimer();
-        if (event?.type === 'reasoning' || event?.item?.type === 'reasoning') continue;
-        if (event?.type === 'item.completed' && event.item?.type === 'agent_message') {
-          finalMessage = event.item.text;
-          continue;
-        }
-        if ((strictClassification || strictAnalysis || strictVisualSpec) && event?.item?.type === 'file_change') {
-          throw workerError(
-            strictClassification ? 'CLASSIFICATION_WRITE_ATTEMPT'
-              : strictVisualSpec ? 'VISUAL_SPECS_WRITE_ATTEMPT' : 'ANALYSIS_WRITE_ATTEMPT',
-            strictClassification ? '提示词分支分类 Agent 不允许直接修改项目文件'
-              : strictVisualSpec ? '资产视觉规格 Agent 不允许直接修改项目文件'
-                : '单集分析 Agent 不允许直接修改项目文件'
-          );
-        }
-        if ((strictClassification || strictAnalysis || strictVisualSpec)
-          && (event?.item?.type === 'mcp_tool_call' || event?.item?.type === 'web_search')) {
-          throw workerError(
-            strictClassification ? 'CLASSIFICATION_TOOL_ATTEMPT'
-              : strictVisualSpec ? 'VISUAL_SPECS_TOOL_ATTEMPT' : 'ANALYSIS_EXTERNAL_TOOL_ATTEMPT',
-            strictClassification ? '提示词分支分类 Agent 不允许调用外部工具'
-              : strictVisualSpec ? '资产视觉规格 Agent 不允许调用外部工具'
-                : '单集分析 Agent 不允许调用外部工具'
-          );
-        }
-        if (strictVisualSpec && event?.item?.type === 'command_execution') {
-          throw workerError('VISUAL_SPECS_COMMAND_ATTEMPT', '资产视觉规格 Agent 不允许执行命令');
-        }
-        if (strictAnalysis && event?.item?.type === 'command_execution' && event.item.status === 'failed') {
-          const exitCode = Number.isInteger(event.item.exit_code) ? `（退出码 ${event.item.exit_code}）` : '';
-          const detail = sanitizeAgentText(event.item.aggregated_output, projectRoot)
-            .replace(/\s+/gu, ' ')
-            .slice(0, 240);
-          const command = sanitizeAgentText(event.item.command, projectRoot)
-            .replace(/\s+/gu, ' ')
-            .slice(0, 160);
-          lastAnalysisCommandError = `单集分析只读查询命令执行失败${exitCode}`
-            + `${command ? `；命令：${command}` : ''}`
-            + `${detail ? `；输出：${detail}` : ''}`;
-          emitProgress(`Codex Agent 只读命令失败，正在尝试恢复：${lastAnalysisCommandError}`);
-          continue;
-        }
-        if (strictAnalysis && event?.item?.type === 'error') {
-          lastItemError = sanitizeAgentText(event.item.message, projectRoot).slice(0, 240)
-            || 'SDK 报告了未提供详情的非致命提示';
-          emitProgress(`Codex Agent 非致命提示：${lastItemError}`);
-          continue;
-        }
-        if (
-          strictClassification
-          && event?.item?.type === 'command_execution'
-          && /(?:get_next_image_job|update_image_progress|build_image_queue|image[_ -]?gen)/iu.test(event.item.command || '')
-        ) {
-          throw workerError('CLASSIFICATION_COMMAND_REJECTED', '提示词分支分类 Agent 尝试执行受保护的生产命令');
-        }
-        if (event?.type === 'turn.failed') {
-          throw new Error(event.error?.message || 'Codex turn failed');
-        }
-        if (event?.type === 'turn.completed') turnCompleted = true;
-        emitProgress(safeEventMessage(event));
-      }
-    } catch (error) {
-      if (abortError) throw abortError;
-      throw classifyRuntimeError(error);
-    }
-    if (!turnCompleted) {
-      if (lastStreamError) throw classifyRuntimeError(new Error(lastStreamError));
-      throw workerError('CODEX_AGENT_FAILED', 'Codex Agent 未正常结束');
-    }
-    if (!finalMessage && strictAnalysis && lastAnalysisCommandError) {
-      throw workerError('ANALYSIS_READ_COMMAND_FAILED', lastAnalysisCommandError);
-    }
-    if (!finalMessage && strictAnalysis && lastItemError) {
-      throw workerError('ANALYSIS_AGENT_ERROR', `单集分析未返回完成回执：${lastItemError}`);
-    }
-    return finalMessage;
-  };
+  const runThread = createCodexThreadRunner({
+    projectRoot,
+    runtimeConfig: request.runtimeConfig,
+    signal: controller.signal,
+    retryLimit,
+    abort,
+    getAbortError: () => abortError,
+    resetIdleTimer,
+    emitProgress
+  });
 
   const consume = async () => {
     const modelLabel = request.runtimeConfig?.model ?? await resolveModelLabel();
@@ -562,55 +297,17 @@ export async function runCodexAgentAction(input, {
       return result;
     }
     if (request.action === 'classify-prompt-branches') {
-      let session = null;
-      try {
-        session = await createBranchClassificationSession(projectRoot, {
-          signal: controller.signal,
-          onProgress: (message) => {
-            resetIdleTimer();
-            emitProgress(message);
-          }
-        });
-        const pageResults = [];
-        if (session.pages.length) {
-          const codex = await createSdk();
-          for (const page of session.pages) {
-            resetIdleTimer();
-            emitProgress(`正在判断提示词分支（第 ${page.page}/${session.pages.length} 页）`);
-            const finalMessage = await runThread({
-              codex,
-              prompt: classificationPagePrompt(page, pipelineSkill.path),
-              outputSchema: page.outputSchema,
-              sandboxMode: 'read-only',
-              strictClassification: true
-            });
-            pageResults.push(session.validatePageResult(
-              page,
-              parseAgentJson(finalMessage, '提示词分支分类')
-            ));
-          }
-        } else {
-          emitProgress('当前没有适用的条件分支，正在生成逐项空选择');
-        }
-        await verifySoftwarePipelineSkill(pipelineSkill);
-        const committed = await session.commit(pageResults);
-        const result = Object.freeze({
-          completed: true,
-          action: request.action,
-          summary: committed.semanticPageCount
-            ? `已完成 ${committed.processedCount} 项提示词分支判断并重建最终队列`
-            : `已为 ${committed.processedCount} 个队列项写入空分支选择并重建最终队列`,
-          processedCount: committed.processedCount,
-          softwareSkill: publicSkillReceipt(pipelineSkill)
-        });
-        emit(`KA_AGENT_RESULT ${JSON.stringify(result)}`);
-        return result;
-      } catch (error) {
-        await session?.rollback?.().catch((rollbackError) => {
-          throw new AggregateError([error, rollbackError], '提示词分支分类失败且回滚失败');
-        });
-        throw classifyRuntimeError(error);
-      }
+      return runBranchClassificationAction({
+        projectRoot,
+        pipelineSkill,
+        signal: controller.signal,
+        createSession: createBranchClassificationSession,
+        createSdk,
+        runThread,
+        resetIdleTimer,
+        emitProgress,
+        emit
+      });
     }
 
     const codex = await createSdk();
