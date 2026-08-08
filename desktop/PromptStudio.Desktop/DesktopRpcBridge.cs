@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Windows;
 using Microsoft.Web.WebView2.Core;
 
 namespace KA.PromptStudio.Desktop;

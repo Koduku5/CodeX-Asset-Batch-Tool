@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -202,4 +204,3 @@ internal sealed partial class DesktopRpcBridge
     private sealed record RpcFailure(string Jsonrpc, JsonElement Id, RpcError Error);
     private sealed record RpcError(int Code, string Message);
 }
-
