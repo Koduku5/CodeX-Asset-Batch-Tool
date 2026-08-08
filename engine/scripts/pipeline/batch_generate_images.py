@@ -9,12 +9,10 @@ import mimetypes
 import os
 import socket
 import stat as stat_module
-import struct
 import sys
 import threading
 import time
 import uuid
-import zlib
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
@@ -42,11 +40,17 @@ from bounded_io import (  # noqa: E402
     decode_strict_json_bytes,
     read_limited_bytes,
 )
-from image_structure import (  # noqa: E402
-    read_stable_validated_image_bytes,
-    valid_gif_bytes as structure_valid_gif_bytes,
-    valid_jpeg_bytes as structure_valid_jpeg_bytes,
-    valid_webp_bytes as structure_valid_webp_bytes,
+from api_batch.image_validation import (  # noqa: E402
+    read_stable_reference_bytes,
+    valid_png,
+    valid_reference_image,
+)
+from api_batch.canvas_layout import save_canvas_nodes  # noqa: E402
+from api_batch.progress_store import (  # noqa: E402
+    ProgressStore,
+    attempt_entry_for,
+    clean_text,
+    normalize_attempt_ledger,
 )
 
 
@@ -56,7 +60,6 @@ QUEUE_VERSION = 4
 PROGRESS_VERSION = 3
 IMAGE_SHEET_ORDER = ("角色", "生物", "群演", "场景", "道具")
 MAX_IMAGE_ATTEMPTS = 2
-PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 RETRYABLE_CODES = {
     "image.upload_timeout",
     "image.timeout",
@@ -73,9 +76,6 @@ TERMINAL_CODES = {
     "image.upload_too_large",
     "project_group_image_generation_disabled",
 }
-PNG_VALIDATION_CACHE: dict[tuple[str, int, int], bool] = {}
-PNG_VALIDATION_MUTEX = threading.Lock()
-PNG_VALIDATION_SEMAPHORE = threading.BoundedSemaphore(2)
 REFERENCE_HASH_CACHE: dict[tuple[str, int, int], str] = {}
 REFERENCE_HASH_MUTEX = threading.Lock()
 
@@ -271,70 +271,6 @@ class BatchLock:
 
     def get(self, key: str, default=None):
         return self.payload.get(key, default)
-
-
-def clean_text(value) -> str:
-    return str(value or "").strip()
-
-
-def normalize_attempt_entry(value) -> dict | None:
-    if not isinstance(value, dict):
-        return None
-    input_fingerprint = clean_text(value.get("inputFingerprint"))
-    if not input_fingerprint:
-        return None
-    attempts = value.get("attempts")
-    if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
-        attempts = 0
-    return {
-        "inputFingerprint": input_fingerprint,
-        "attempts": attempts,
-        "lastError": str(value.get("lastError") or ""),
-        "updatedAt": str(value.get("updatedAt") or ""),
-    }
-
-
-def normalize_attempt_ledger(state) -> dict:
-    state = state if isinstance(state, dict) else {}
-    ledger = {}
-    saved_ledger = state.get("attemptLedger")
-    if isinstance(saved_ledger, dict):
-        for backend in ("builtin", "api"):
-            entry = normalize_attempt_entry(saved_ledger.get(backend))
-            if entry is not None:
-                ledger[backend] = entry
-    legacy_backend = state.get("backend")
-    if legacy_backend in {"builtin", "api"}:
-        input_fingerprint = clean_text(
-            state.get("builtinPromptFingerprint")
-            if legacy_backend == "builtin"
-            else state.get("inputFingerprint")
-        )
-        if input_fingerprint and ledger.get(legacy_backend, {}).get(
-            "inputFingerprint"
-        ) != input_fingerprint:
-            attempts = state.get("attempts")
-            if not isinstance(attempts, int) or isinstance(attempts, bool) or attempts < 0:
-                attempts = 0
-            ledger[legacy_backend] = {
-                "inputFingerprint": input_fingerprint,
-                "attempts": attempts,
-                "lastError": str(state.get("error") or ""),
-                "updatedAt": str(state.get("updatedAt") or ""),
-            }
-    return ledger
-
-
-def attempt_entry_for(ledger: dict, backend: str, input_fingerprint: str) -> dict:
-    current = normalize_attempt_entry(ledger.get(backend))
-    if current is not None and current["inputFingerprint"] == input_fingerprint:
-        return current
-    return {
-        "inputFingerprint": input_fingerprint,
-        "attempts": 0,
-        "lastError": "",
-        "updatedAt": "",
-    }
 
 
 def normalize_prompt_text(value) -> str:
@@ -554,193 +490,6 @@ def install_downloaded_file_without_overwrite(
         raise OutputConflictError(f"结果文件在下载期间出现，已停止覆盖：{output_path}") from error
     except OSError as error:
         raise RuntimeError(f"无法以不覆盖方式安装结果图片：{output_path}（{error}）") from error
-
-
-def _validate_png_bytes(raw: bytes) -> bool:
-    try:
-        if not raw.startswith(PNG_SIGNATURE):
-            return False
-        offset = len(PNG_SIGNATURE)
-        saw_ihdr = False
-        saw_idat = False
-        idat_closed = False
-        saw_plte = False
-        idat_parts = []
-        width = height = bit_depth = color_type = interlace = 0
-        valid_depths = {
-            0: {1, 2, 4, 8, 16},
-            2: {8, 16},
-            3: {1, 2, 4, 8},
-            4: {8, 16},
-            6: {8, 16},
-        }
-        while offset < len(raw):
-            if offset + 12 > len(raw):
-                return False
-            length, chunk_type = struct.unpack_from(">I4s", raw, offset)
-            data_start = offset + 8
-            data_end = data_start + length
-            chunk_end = data_end + 4
-            if chunk_end > len(raw):
-                return False
-            chunk_data = raw[data_start:data_end]
-            stored_crc = struct.unpack_from(">I", raw, data_end)[0]
-            if not all(
-                ord("A") <= value <= ord("Z") or ord("a") <= value <= ord("z")
-                for value in chunk_type
-            ) or not (ord("A") <= chunk_type[2] <= ord("Z")):
-                return False
-            if stored_crc != (zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF):
-                return False
-            if not saw_ihdr and chunk_type != b"IHDR":
-                return False
-
-            if chunk_type == b"IHDR":
-                if saw_ihdr or length != 13:
-                    return False
-                (
-                    width,
-                    height,
-                    bit_depth,
-                    color_type,
-                    compression,
-                    filtering,
-                    interlace,
-                ) = struct.unpack(">IIBBBBB", chunk_data)
-                if (
-                    width <= 0
-                    or height <= 0
-                    or bit_depth not in valid_depths.get(color_type, set())
-                    or compression != 0
-                    or filtering != 0
-                    or interlace not in {0, 1}
-                ):
-                    return False
-                saw_ihdr = True
-            elif chunk_type == b"PLTE":
-                if saw_plte or saw_idat or length == 0 or length > 768 or length % 3:
-                    return False
-                if color_type in {0, 4}:
-                    return False
-                if color_type == 3 and length // 3 > 2**bit_depth:
-                    return False
-                saw_plte = True
-            elif chunk_type == b"IDAT":
-                if idat_closed or (color_type == 3 and not saw_plte):
-                    return False
-                saw_idat = True
-                idat_parts.append(chunk_data)
-            elif chunk_type == b"IEND":
-                if length != 0 or not saw_idat or chunk_end != len(raw):
-                    return False
-                offset = chunk_end
-                break
-            elif not (chunk_type[0] & 0x20):
-                return False
-            if saw_idat and chunk_type != b"IDAT":
-                idat_closed = True
-            offset = chunk_end
-        else:
-            return False
-
-        channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[color_type]
-        bits_per_pixel = channels * bit_depth
-        passes = [(0, 0, 1, 1)] if interlace == 0 else [
-            (0, 0, 8, 8),
-            (4, 0, 8, 8),
-            (0, 4, 4, 8),
-            (2, 0, 4, 4),
-            (0, 2, 2, 4),
-            (1, 0, 2, 2),
-            (0, 1, 1, 2),
-        ]
-        scanlines = []
-        expected_size = 0
-        for start_x, start_y, step_x, step_y in passes:
-            pass_width = 0 if width <= start_x else (width - start_x + step_x - 1) // step_x
-            pass_height = 0 if height <= start_y else (height - start_y + step_y - 1) // step_y
-            if not pass_width or not pass_height:
-                continue
-            row_size = (pass_width * bits_per_pixel + 7) // 8
-            scanlines.append((pass_height, row_size))
-            expected_size += pass_height * (row_size + 1)
-        if expected_size > 128 * 1024 * 1024:
-            return False
-        decompressor = zlib.decompressobj()
-        decoded = decompressor.decompress(b"".join(idat_parts), expected_size + 1)
-        if decompressor.unconsumed_tail or len(decoded) > expected_size:
-            return False
-        decoded += decompressor.flush(expected_size + 1 - len(decoded))
-        if (
-            len(decoded) != expected_size
-            or not decompressor.eof
-            or decompressor.unused_data
-            or decompressor.unconsumed_tail
-        ):
-            return False
-        decoded_offset = 0
-        for pass_height, row_size in scanlines:
-            for _ in range(pass_height):
-                if decoded[decoded_offset] > 4:
-                    return False
-                decoded_offset += row_size + 1
-        return decoded_offset == len(decoded)
-    except (FileNotFoundError, IsADirectoryError, OSError, KeyError, struct.error, zlib.error):
-        return False
-
-
-def _validate_png_file(path: Path) -> bool:
-    try:
-        return _validate_png_bytes(path.read_bytes())
-    except (FileNotFoundError, IsADirectoryError, OSError):
-        return False
-
-
-def valid_png(path: Path) -> bool:
-    try:
-        resolved = os.path.normcase(str(path.resolve()))
-        stat = path.stat()
-        if not path.is_file() or stat.st_size <= 0 or stat.st_size > MAX_IMAGE_RESPONSE_BYTES:
-            return False
-    except (FileNotFoundError, IsADirectoryError, OSError):
-        return False
-    cache_key = (resolved, stat.st_size, stat.st_mtime_ns)
-    with PNG_VALIDATION_MUTEX:
-        cached = PNG_VALIDATION_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-    with PNG_VALIDATION_SEMAPHORE:
-        result = _validate_png_file(path)
-    try:
-        final_stat = path.stat()
-    except (FileNotFoundError, IsADirectoryError, OSError):
-        return False
-    if (final_stat.st_size, final_stat.st_mtime_ns) != (stat.st_size, stat.st_mtime_ns):
-        return False
-    with PNG_VALIDATION_MUTEX:
-        stale_keys = [key for key in PNG_VALIDATION_CACHE if key[0] == resolved]
-        for stale_key in stale_keys:
-            PNG_VALIDATION_CACHE.pop(stale_key, None)
-        PNG_VALIDATION_CACHE[cache_key] = result
-    return result
-
-
-def read_stable_reference_bytes(path: Path) -> bytes | None:
-    return read_stable_validated_image_bytes(
-        path,
-        20 * 1024 * 1024,
-        {
-            ".png": _validate_png_bytes,
-            ".jpg": structure_valid_jpeg_bytes,
-            ".jpeg": structure_valid_jpeg_bytes,
-            ".gif": structure_valid_gif_bytes,
-            ".webp": structure_valid_webp_bytes,
-        },
-    )
-
-
-def valid_reference_image(path: Path) -> bool:
-    return read_stable_reference_bytes(path) is not None
 
 
 def valid_api_prompt_batch(queue: dict) -> bool:
@@ -1482,130 +1231,6 @@ def progress_has_remote_tasks(store) -> bool:
     )
 
 
-class ProgressStore:
-    def __init__(self, queue: dict):
-        value = read_json(PROGRESS_PATH, fallback={"version": PROGRESS_VERSION, "items": {}})
-        if not isinstance(value, dict):
-            raise SystemExit("出图进度顶层必须是对象")
-        if not isinstance(value.get("items"), dict):
-            raise SystemExit("出图进度 items 必须是对象")
-        if DIRECTORY_REDRAW_MODE and value["items"]:
-            if (
-                value.get("version") != 1
-                or value.get("operation") != "directory_redraw"
-                or clean_text(value.get("batchId")) != clean_text(queue.get("batchId"))
-                or clean_text(value.get("queueFingerprint"))
-                != clean_text(queue.get("queueFingerprint"))
-            ):
-                raise SystemExit(
-                    "批量重绘进度与当前队列的批次或指纹不一致，禁止收养旧任务状态"
-                )
-        value["version"] = 1 if DIRECTORY_REDRAW_MODE else PROGRESS_VERSION
-        if DIRECTORY_REDRAW_MODE:
-            value["operation"] = "directory_redraw"
-            value["batchId"] = queue["batchId"]
-            value["queueFingerprint"] = queue["queueFingerprint"]
-        else:
-            value["routingFingerprint"] = queue["routingFingerprint"]
-        self.value = value
-        self.mutex = threading.Lock()
-
-    def get(self, key: str) -> dict:
-        with self.mutex:
-            state = self.value["items"].get(key)
-            return dict(state) if isinstance(state, dict) else {}
-
-    def set(self, key: str, state: dict) -> None:
-        with self.mutex:
-            next_state = dict(state)
-            if not DIRECTORY_REDRAW_MODE:
-                previous = self.value["items"].get(key)
-                merged_ledger = normalize_attempt_ledger(previous)
-                incoming_ledger = normalize_attempt_ledger(next_state)
-                for backend, entry in incoming_ledger.items():
-                    merged_ledger[backend] = entry
-                backend = next_state.get("backend")
-                if backend in {"builtin", "api"}:
-                    input_fingerprint = clean_text(
-                        next_state.get("builtinPromptFingerprint")
-                        if backend == "builtin"
-                        else next_state.get("inputFingerprint")
-                    )
-                    if input_fingerprint:
-                        attempts = next_state.get("attempts")
-                        if (
-                            not isinstance(attempts, int)
-                            or isinstance(attempts, bool)
-                            or attempts < 0
-                        ):
-                            attempts = 0
-                        merged_ledger[backend] = {
-                            "inputFingerprint": input_fingerprint,
-                            "attempts": attempts,
-                            "lastError": str(next_state.get("error") or ""),
-                            "updatedAt": str(next_state.get("updatedAt") or ""),
-                        }
-                next_state["attemptLedger"] = merged_ledger
-            self.value["items"][key] = next_state
-            write_json_atomic(PROGRESS_PATH, self.value)
-
-    def snapshot(self) -> dict:
-        with self.mutex:
-            return json.loads(json.dumps(self.value, ensure_ascii=False))
-
-    def set_batch_configuration(self, queue: dict) -> None:
-        with self.mutex:
-            api_batch = self.value.get("apiBatch")
-            api_batch = dict(api_batch) if isinstance(api_batch, dict) else {}
-            api_batch["configuration"] = {
-                "operation": queue_operation(queue),
-                "baseUrl": BASE_URL,
-                "projectId": PROJECT_ID,
-                "modelId": MODEL_ID,
-                "aspectRatio": DEFAULT_ASPECT_RATIO,
-                "imageSize": DEFAULT_IMAGE_SIZE,
-                "executionFingerprint": api_execution_fingerprint(),
-                "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
-            if DIRECTORY_REDRAW_MODE:
-                api_batch["configuration"].update(
-                    {
-                        "sourceRoot": queue["sourceRoot"],
-                        "outputRoot": queue["outputRoot"],
-                        "promptFingerprint": queue["promptFingerprint"],
-                        "batchId": queue["batchId"],
-                        "queueFingerprint": queue["queueFingerprint"],
-                    }
-                )
-            self.value["apiBatch"] = api_batch
-            write_json_atomic(PROGRESS_PATH, self.value)
-
-    def set_canvas_status(
-        self,
-        status: str,
-        *,
-        error: str = "",
-        nodes: int | None = None,
-        edges: int | None = None,
-    ) -> None:
-        with self.mutex:
-            api_batch = self.value.get("apiBatch")
-            api_batch = dict(api_batch) if isinstance(api_batch, dict) else {}
-            api_batch.update(
-                {
-                    "canvasStatus": status,
-                    "canvasError": clean_text(error)[:2000],
-                    "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                }
-            )
-            if nodes is not None:
-                api_batch["nodes"] = nodes
-            if edges is not None:
-                api_batch["edges"] = edges
-            self.value["apiBatch"] = api_batch
-            write_json_atomic(PROGRESS_PATH, self.value)
-
-
 def read_json_response(response):
     raw = read_limited_bytes(
         response,
@@ -1936,150 +1561,6 @@ def failure_details(error: Exception, attempts: int) -> dict:
         "retryable": retryable,
         "terminal": (not retryable) or attempts >= MAX_IMAGE_ATTEMPTS,
     }
-
-
-def element_image_url(element: dict) -> str:
-    if element.get("type") in {"image", "drawing"}:
-        return clean_text(element.get("src"))
-    if element.get("type") == "imageGenerator":
-        return clean_text(element.get("generatedImageSrc"))
-    return ""
-
-
-def generator_display_size(aspect_ratio: str) -> tuple[float, float]:
-    try:
-        width_ratio, height_ratio = map(float, aspect_ratio.split(":", 1))
-        ratio = width_ratio / height_ratio
-    except (ValueError, ZeroDivisionError):
-        return 320, 320
-    return (320, 320 / ratio) if ratio > 1 else (320 * ratio, 320)
-
-
-def save_canvas_nodes(auth: AuthSession, records: list[dict]) -> dict:
-    if not records:
-        return {"nodes": 0, "edges": 0}
-    _, project = auth.request("GET", f"/projects/{PROJECT_ID}")
-    canvas = dict(project.get("data") or {})
-    elements = list(canvas.get("elements") or [])
-    edges = list(canvas.get("edges") or [])
-    root_order = list(canvas.get("rootOrder") or [])
-    if not root_order and elements:
-        root_order = [
-            element["id"]
-            for element in sorted(elements, key=lambda item: item.get("zIndex", 0), reverse=True)
-        ]
-    reference_node_ids = {}
-    result_node_ids = {}
-    for element in elements:
-        image_url = element_image_url(element)
-        if image_url:
-            reference_node_ids.setdefault(image_url, element["id"])
-        if element.get("type") == "imageGenerator" and image_url:
-            result_node_ids.setdefault(image_url, element["id"])
-    edge_pairs = {(edge.get("sourceNodeId"), edge.get("targetNodeId")) for edge in edges}
-    existing_right = max(
-        (
-            element.get("position", {}).get("x", 0) + element.get("width", 0) / 2
-            for element in elements
-        ),
-        default=-400,
-    )
-    base_x = existing_right + 400 if elements else 0
-    base_y = min((element.get("position", {}).get("y", 0) for element in elements), default=0)
-    next_z = max((element.get("zIndex", 0) for element in elements), default=0) + 1
-    new_node_ids = []
-    new_edge_count = 0
-    reference_urls = list(
-        dict.fromkeys(url for record in records for url in record["references"])
-    )
-    for reference_index, image_url in enumerate(reference_urls, start=1):
-        if image_url in reference_node_ids:
-            continue
-        node_id = "batch-ref-" + uuid.uuid4().hex
-        elements.append(
-            {
-                "id": node_id,
-                "type": "image",
-                "name": f"Batch 引用 {reference_index}",
-                "position": {"x": base_x, "y": base_y + (reference_index - 1) * 360},
-                "width": 300,
-                "height": 300,
-                "rotation": 0,
-                "zIndex": next_z,
-                "src": image_url,
-            }
-        )
-        next_z += 1
-        new_node_ids.append(node_id)
-        reference_node_ids[image_url] = node_id
-    for row, record in enumerate(sorted(records, key=lambda item: item["index"])):
-        for image_index, image_url in enumerate(record["images"], start=1):
-            node_id = result_node_ids.get(image_url)
-            if not node_id:
-                node_id = "batch-result-" + uuid.uuid4().hex
-                width, height = generator_display_size(record["aspect_ratio"])
-                settings = {
-                    "aspectRatio": record["aspect_ratio"],
-                    "imageSize": record["image_size"],
-                    "modelId": record["model_id"],
-                }
-                elements.append(
-                    {
-                        "id": node_id,
-                        "type": "imageGenerator",
-                        "name": f"Batch 结果 {record['index']:03d}-{image_index:02d}",
-                        "position": {
-                            "x": base_x + 520 + (image_index - 1) * 380,
-                            "y": base_y + row * 380,
-                        },
-                        "width": width,
-                        "height": height,
-                        "rotation": 0,
-                        "zIndex": next_z,
-                        "prompt": record["prompt"],
-                        "generatedImageSrc": image_url,
-                        "aspectRatio": record["aspect_ratio"],
-                        "imageSize": record["image_size"],
-                        "modelId": record["model_id"],
-                        "isGenerating": False,
-                        "generatedImageSettings": settings,
-                    }
-                )
-                next_z += 1
-                new_node_ids.append(node_id)
-                result_node_ids[image_url] = node_id
-            for reference_url in record["references"]:
-                edge_pair = (reference_node_ids[reference_url], node_id)
-                if edge_pair in edge_pairs:
-                    continue
-                edges.append(
-                    {
-                        "id": "batch-edge-" + uuid.uuid4().hex,
-                        "sourceNodeId": edge_pair[0],
-                        "targetNodeId": node_id,
-                        "sourcePortKey": "output",
-                        "targetPortKey": "input_0",
-                        "sourceImageSnapshotUrl": reference_url,
-                    }
-                )
-                edge_pairs.add(edge_pair)
-                new_edge_count += 1
-    try:
-        migration_version = max(int(canvas.get("migrationVersion") or 0), 4)
-    except (TypeError, ValueError):
-        migration_version = 4
-    canvas.update(
-        {
-            "elements": elements,
-            "rootOrder": new_node_ids + [item for item in root_order if item not in new_node_ids],
-            "groupMeta": canvas.get("groupMeta") or {},
-            "edges": edges,
-            "migrationVersion": migration_version,
-            "analysisResults": canvas.get("analysisResults") or {},
-        }
-    )
-    auth.request("PUT", f"/projects/{PROJECT_ID}", {"data": canvas})
-    return {"nodes": len(new_node_ids), "edges": new_edge_count}
 
 
 def current_state_for_item(store: ProgressStore, item: dict) -> dict:
@@ -2733,7 +2214,21 @@ def main() -> None:
     store = None
     exit_code = 0
     try:
-        store = ProgressStore(queue)
+        store = ProgressStore(
+            queue,
+            progress_path=PROGRESS_PATH,
+            progress_version=PROGRESS_VERSION,
+            directory_redraw_mode=DIRECTORY_REDRAW_MODE,
+            read_json=read_json,
+            write_json_atomic=write_json_atomic,
+            queue_operation=queue_operation,
+            base_url=BASE_URL,
+            project_id=PROJECT_ID,
+            model_id=MODEL_ID,
+            aspect_ratio=DEFAULT_ASPECT_RATIO,
+            image_size=DEFAULT_IMAGE_SIZE,
+            api_execution_fingerprint=api_execution_fingerprint,
+        )
         store.set_batch_configuration(queue)
         freshness_errors = queue_freshness_errors(queue)
         if freshness_errors:
@@ -2870,6 +2365,7 @@ def main() -> None:
             try:
                 saved = save_canvas_nodes(
                     auth,
+                    PROJECT_ID,
                     canvas_records(queue, store.snapshot()),
                 )
                 store.set_canvas_status(
