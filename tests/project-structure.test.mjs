@@ -88,6 +88,8 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'engine/scripts/lib/asset_record_validation.py',
     'engine/scripts/lib/episode_asset_merge.py',
     'engine/scripts/lib/pending_asset_resolution.py',
+    'engine/scripts/lib/screenplay_sources.py',
+    'engine/scripts/lib/screenplay_cache.py',
     'engine/scripts/lib/pipeline_lock_protocol.py',
     'engine/scripts/lib/pipeline_transaction_protocol.py',
     'engine/scripts/lib/pipeline_protocol.py',
