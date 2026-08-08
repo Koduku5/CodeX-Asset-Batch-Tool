@@ -1,6 +1,5 @@
 import hashlib
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -22,25 +21,17 @@ from source_manifest_protocol import (  # noqa: E402
     validate_root_and_sources,
 )
 from world_records_protocol import world_fact_quality_issues  # noqa: E402
+from asset_record_validation import (  # noqa: E402
+    ASSET_ID_PREFIXES,
+    ASSET_ID_RE,
+    CATEGORY_FILES,
+    FACTION_CATEGORIES,
+    normalize,
+    same_subject_form_family,
+    subject_name,
+)
 
 
-CATEGORY_FILES = {
-    "characters": "角色记录.json",
-    "creatures": "生物记录.json",
-    "extras": "群演记录.json",
-    "scenes": "场景记录.json",
-    "props": "道具记录.json",
-}
-ASSET_ID_PREFIXES = {
-    "characters": "CHAR",
-    "creatures": "CREATURE",
-    "extras": "CROWD",
-    "scenes": "SCENE",
-    "props": "PROP",
-}
-ASSET_ID_RE = re.compile(r"^(CHAR|CREATURE|CROWD|SCENE|PROP)-(\d{3,})-EP([1-9]\d*)$")
-SHAPE_SUFFIX_RE = re.compile(r"\s*[（(][^）)]*[）)]\s*$")
-FACTION_CATEGORIES = {"characters", "creatures", "extras"}
 REQUIRED_ASSET_FIELDS = {
     "assetName",
     "productionNotes",
@@ -73,29 +64,6 @@ def read_json(path: Path, expected: str) -> object:
 
 def clean_text(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
-
-
-def normalize(value: str) -> str:
-    return re.sub(r"\s+", "", value).casefold()
-
-
-def subject_name(asset_name: str) -> str:
-    return SHAPE_SUFFIX_RE.sub("", clean_text(asset_name)).strip()
-
-
-def same_subject_form_family(
-    left: dict[str, object], right: dict[str, object]
-) -> bool:
-    """Return whether two distinct asset names are explicit forms of one subject."""
-    left_name = clean_text(left.get("assetName"))
-    right_name = clean_text(right.get("assetName"))
-    if not left_name or not right_name or normalize(left_name) == normalize(right_name):
-        return False
-    left_subject = subject_name(left_name)
-    right_subject = subject_name(right_name)
-    if not left_subject or normalize(left_subject) != normalize(right_subject):
-        return False
-    return left_subject != left_name or right_subject != right_name
 
 
 def has_explicit_form_name(asset_name: str) -> bool:
