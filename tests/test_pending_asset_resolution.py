@@ -1,5 +1,5 @@
-import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,12 +7,14 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = ROOT / "engine" / "scripts" / "pipeline" / "resolve_pending_asset.py"
-SPEC = importlib.util.spec_from_file_location("resolve_pending_asset", MODULE_PATH)
-assert SPEC and SPEC.loader
-MODULE = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(MODULE)
+LIB_DIR = ROOT / "engine" / "scripts" / "lib"
+PIPELINE_DIR = ROOT / "engine" / "scripts" / "pipeline"
+for module_root in (LIB_DIR, PIPELINE_DIR):
+    if str(module_root) not in sys.path:
+        sys.path.insert(0, str(module_root))
+import pending_asset_resolution as MODULE  # noqa: E402
 import pipeline_protocol  # noqa: E402
+import pipeline_transaction_protocol  # noqa: E402
 
 
 def asset(name, episode, order, asset_id, aliases=None, setting=None):
@@ -241,7 +243,7 @@ class PendingAssetResolutionTests(unittest.TestCase):
             second = cache / "second.json"
             first.write_text('{"value":"before-first"}\n', encoding="utf-8")
             second.write_text('{"value":"before-second"}\n', encoding="utf-8")
-            original = pipeline_protocol._replace_bytes_atomic
+            original = pipeline_transaction_protocol._replace_bytes_atomic
             commit_count = 0
 
             def fail_second_commit(target, value, label):
@@ -252,7 +254,11 @@ class PendingAssetResolutionTests(unittest.TestCase):
                         raise OSError("injected commit failure")
                 return original(target, value, label)
 
-            with patch.object(pipeline_protocol, "_replace_bytes_atomic", fail_second_commit):
+            with patch.object(
+                pipeline_transaction_protocol,
+                "_replace_bytes_atomic",
+                fail_second_commit,
+            ):
                 with self.assertRaises(OSError):
                     pipeline_protocol.transactional_commit_json(
                         cache,
