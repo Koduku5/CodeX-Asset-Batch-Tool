@@ -1,6 +1,5 @@
-import { spawn } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
@@ -17,7 +16,6 @@ import {
   nextAnalysisEpisode,
   normalizeAnalysisProgress,
   readAnalysisProgressFile,
-  readAssetRegistries,
   verifyEpisodeCommit
 } from './codex-agent/analysis-progress.mjs';
 import { analysisPrompt } from './codex-agent/analyze-screenplay.mjs';
@@ -33,6 +31,12 @@ import {
   visualSpecResultSchema
 } from './codex-agent/contracts.mjs';
 import { isOutside } from './codex-agent/path-safety.mjs';
+import {
+  commitAnalysisEpisodeDefault,
+  commitWorldOverviewDefault,
+  prepareAnalysisEpisodeDefault,
+  runVisualSpecScriptDefault
+} from './codex-agent/pipeline-bridge.mjs';
 import {
   parseAgentJson,
   parseFinalResult,
@@ -66,7 +70,6 @@ export const CODEX_AGENT_ACTIONS = Object.freeze([
 
 const ACTIONS = new Set(CODEX_AGENT_ACTIONS);
 const MAX_PROGRESS_EVENTS = 512;
-const MAX_PIPELINE_COMMAND_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_NETWORK_RETRY_LIMIT = 3;
 const DEFAULT_TIMEOUTS = Object.freeze({
   'analyze-screenplay': Object.freeze({ total: 2 * 60 * 60 * 1000, idle: 8 * 60 * 1000 }),
@@ -167,161 +170,6 @@ const classifyRuntimeError = (error) => {
     return workerError('CODEX_RUNTIME_UNAVAILABLE', 'Codex 本地运行时不可用', error);
   }
   return workerError('CODEX_AGENT_FAILED', 'Codex Agent 执行失败', error);
-};
-
-const runControlledProcess = ({ executable, argumentsList, cwd, input = null, signal, onActivity }) => new Promise((resolve, reject) => {
-  let stdout = Buffer.alloc(0);
-  let stderr = Buffer.alloc(0);
-  let settled = false;
-  const child = spawn(executable, argumentsList, {
-    cwd,
-    windowsHide: true,
-    signal,
-    stdio: ['pipe', 'pipe', 'pipe']
-  });
-  const append = (current, chunk) => {
-    const combined = Buffer.concat([current, Buffer.from(chunk)]);
-    return combined.length > MAX_PIPELINE_COMMAND_OUTPUT_BYTES
-      ? combined.subarray(combined.length - MAX_PIPELINE_COMMAND_OUTPUT_BYTES)
-      : combined;
-  };
-  child.stdout.on('data', (chunk) => {
-    stdout = append(stdout, chunk);
-    onActivity?.();
-  });
-  child.stderr.on('data', (chunk) => {
-    stderr = append(stderr, chunk);
-    onActivity?.();
-  });
-  child.once('error', (error) => {
-    if (settled) return;
-    settled = true;
-    reject(error);
-  });
-  child.once('close', (code, closeSignal) => {
-    if (settled) return;
-    settled = true;
-    if (code === 0 && !closeSignal) {
-      resolve(stdout.toString('utf8'));
-      return;
-    }
-    reject(new Error(`pipeline command exited with ${closeSignal ? `signal ${closeSignal}` : `code ${code ?? 1}`}: ${stderr.toString('utf8')}`));
-  });
-  child.stdin.on('error', () => {});
-  if (input === null) child.stdin.end();
-  else child.stdin.end(input, 'utf8');
-});
-
-const runProjectPipelineScript = async ({
-  projectRoot, runtime, script, argumentsList, input, signal, onActivity, label,
-  errorCode = 'ANALYSIS_PIPELINE_FAILED'
-}) => {
-  const runner = join(projectRoot, 'scripts', 'commands', `${runtime}.ps1`);
-  const scriptPath = join(projectRoot, 'scripts', 'pipeline', script);
-  try {
-    return await runControlledProcess({
-      executable: 'powershell.exe',
-      argumentsList: [
-        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
-        runner, scriptPath, projectRoot, ...argumentsList
-      ],
-      cwd: projectRoot,
-      input,
-      signal,
-      onActivity
-    });
-  } catch (error) {
-    if (signal?.aborted) throw signal.reason ?? error;
-    const detail = sanitizeAgentText(error?.message, projectRoot)
-      .replace(/^pipeline command exited with (?:signal \S+|code \d+):\s*/iu, '')
-      .replace(/\s+/gu, ' ')
-      .slice(0, 240);
-    throw workerError(errorCode, `${label}失败${detail ? `：${detail}` : ''}`, error);
-  }
-};
-
-const prepareAnalysisEpisodeDefault = async ({ projectRoot, episode, resume, signal, onActivity, onProgress }) => {
-  await runProjectPipelineScript({
-    projectRoot,
-    runtime: 'node',
-    script: 'update_analysis_progress.mjs',
-    argumentsList: ['start', String(episode), ...(resume ? ['--resume'] : [])],
-    signal,
-    onActivity,
-    label: `第 ${episode} 集开始标记`
-  });
-  onProgress?.('当前集分析进度已更新');
-};
-
-const commitAnalysisEpisodeDefault = async ({ projectRoot, episode, analysis, signal, onActivity, onProgress }) => {
-  const registries = await readAssetRegistries(projectRoot);
-  const reconciledAnalysis = reconcileAnalysisAssetIdentities(analysis, registries);
-  await runProjectPipelineScript({
-    projectRoot,
-    runtime: 'python',
-    script: 'write_episode_analysis.py',
-    argumentsList: [String(episode)],
-    input: JSON.stringify(reconciledAnalysis),
-    signal,
-    onActivity,
-    label: `第 ${episode} 集分析文件写入`
-  });
-  onProgress?.('当前集分析文件已安全保存');
-  await runProjectPipelineScript({
-    projectRoot,
-    runtime: 'python',
-    script: 'sync_episode_analysis.py',
-    argumentsList: [String(episode)],
-    signal,
-    onActivity,
-    label: `第 ${episode} 集累计同步`
-  });
-  onProgress?.('当前集分析结果已累计保存');
-  await runProjectPipelineScript({
-    projectRoot,
-    runtime: 'node',
-    script: 'update_analysis_progress.mjs',
-    argumentsList: ['complete', String(episode)],
-    signal,
-    onActivity,
-    label: `第 ${episode} 集完成标记`
-  });
-  onProgress?.('当前集分析进度已更新');
-};
-
-const runVisualSpecScriptDefault = async ({ projectRoot, command, payload = null, signal, onActivity }) => {
-  const text = await runProjectPipelineScript({
-    projectRoot,
-    runtime: 'python',
-    script: 'asset_visual_specs.py',
-    argumentsList: [command],
-    input: payload === null ? null : JSON.stringify(payload),
-    signal,
-    onActivity,
-    label: `资产视觉规格${command === 'commit' ? '回填' : command === 'next' ? '读取' : '初始化'}`,
-    errorCode: 'VISUAL_SPECS_PIPELINE_FAILED'
-  });
-  const result = parseAgentJson(text, '资产视觉规格本地脚本');
-  if (result?.ok !== true) throw workerError('VISUAL_SPECS_PIPELINE_FAILED', '资产视觉规格本地脚本未返回成功状态');
-  return result;
-};
-
-const commitWorldOverviewDefault = async ({ projectRoot, content, signal, onActivity, onProgress }) => {
-  const text = await runProjectPipelineScript({
-    projectRoot,
-    runtime: 'python',
-    script: 'finalize_world_overview.py',
-    argumentsList: [],
-    input: JSON.stringify({ content }),
-    signal,
-    onActivity,
-    label: '世界观总览正式提交',
-    errorCode: 'WORLD_OVERVIEW_PIPELINE_FAILED'
-  });
-  const receipt = parseAgentJson(text, '世界观总览正式脚本');
-  if (receipt?.ok !== true) throw workerError('WORLD_OVERVIEW_PIPELINE_FAILED', '世界观总览正式脚本未返回成功状态');
-  onProgress?.('世界观总览已完成正式校验');
-  return receipt;
 };
 
 const safeEventMessage = (event) => {
