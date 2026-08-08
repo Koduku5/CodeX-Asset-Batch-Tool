@@ -59,6 +59,7 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'engine/scripts/lib/pipeline-runtime/prompt-fields.mjs',
     'engine/scripts/lib/pipeline-runtime/builtin-batch.mjs',
     'engine/scripts/lib/pipeline-runtime/prompt-spec.mjs',
+    'engine/scripts/lib/image_queue_item_builder.mjs',
     'engine/scripts/lib/image-job/claim-contracts.mjs',
     'engine/scripts/lib/image-job/queue-context.mjs',
     'engine/scripts/lib/image-job/claim-recovery.mjs',
