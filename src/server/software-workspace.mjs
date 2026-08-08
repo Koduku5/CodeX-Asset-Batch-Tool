@@ -28,6 +28,14 @@ import {
   validateDisplayName,
   validateProjectId
 } from './software-workspace/contracts.mjs';
+import {
+  assertPathInside,
+  assertPlainExistingEntry,
+  assertSafeTargetChain,
+  isPathInside,
+  lstatOrNull,
+  samePath
+} from './software-workspace/path-safety.mjs';
 
 export {
   MAX_SCREENPLAY_BYTES,
@@ -51,8 +59,6 @@ const SHARED_ASSETS_MANIFEST_FILENAME = '.shared-assets-source.json';
 const SHARED_ASSETS_MANIFEST_ALGORITHM = 'sha256-tree-v1';
 const PROMPT_CATALOG_RELATIVE_PATH = '图片生成/prompts/catalog.json';
 
-const isMissing = (error) => error?.code === 'ENOENT';
-
 const isGeneratedRuntimeNoise = (name) => (
   name === '__pycache__' || name.toLocaleLowerCase('en-US').endsWith('.pyc')
 );
@@ -62,57 +68,6 @@ const readRuntimeSourceEntries = async (root) => {
   return entries
     .filter((entry) => !isGeneratedRuntimeNoise(entry))
     .sort((left, right) => left.localeCompare(right));
-};
-
-const normalizeComparablePath = (value) => {
-  const normalized = resolve(value).replace(/^\\\\\?\\/u, '').replaceAll('/', sep);
-  return process.platform === 'win32' ? normalized.toLocaleLowerCase('en-US') : normalized;
-};
-
-const samePath = (left, right) => normalizeComparablePath(left) === normalizeComparablePath(right);
-
-const isPathInside = (root, candidate, { allowRoot = false } = {}) => {
-  const offset = relative(resolve(root), resolve(candidate));
-  if (!offset) return allowRoot;
-  return offset !== '..' && !offset.startsWith(`..${sep}`) && !isAbsolute(offset);
-};
-
-const assertPathInside = (root, candidate, label, { allowRoot = false } = {}) => {
-  if (!isPathInside(root, candidate, { allowRoot })) {
-    fail('PATH_OUTSIDE_SOFTWARE_ROOT', `${label} 必须位于软件目录内`);
-  }
-};
-
-const lstatOrNull = async (path) => {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if (isMissing(error)) return null;
-    throw error;
-  }
-};
-
-const assertPlainExistingEntry = async (path, label, expectedKind = null) => {
-  const info = await lstatOrNull(path);
-  if (info === null) fail('MISSING_SOURCE', `${label} 不存在`);
-  if (info.isSymbolicLink()) fail('UNSAFE_REPARSE_POINT', `${label} 不允许使用符号链接或目录联接`);
-  if (expectedKind === 'directory' && !info.isDirectory()) fail('INVALID_DIRECTORY', `${label} 必须是目录`);
-  if (expectedKind === 'file' && !info.isFile()) fail('INVALID_FILE', `${label} 必须是普通文件`);
-  return info;
-};
-
-const assertSafeTargetChain = async (softwareRoot, target, label) => {
-  assertPathInside(softwareRoot, target, label, { allowRoot: true });
-  await assertPlainExistingEntry(softwareRoot, 'softwareRoot', 'directory');
-  const offset = relative(resolve(softwareRoot), resolve(target));
-  if (!offset) return;
-  let cursor = resolve(softwareRoot);
-  for (const part of offset.split(sep)) {
-    cursor = join(cursor, part);
-    const info = await lstatOrNull(cursor);
-    if (info === null) return;
-    if (info.isSymbolicLink()) fail('UNSAFE_REPARSE_POINT', `${label} 的路径中含有符号链接或目录联接`);
-  }
 };
 
 const validateSourceTree = async (sourceRoot, label, budget, depth = 0) => {
