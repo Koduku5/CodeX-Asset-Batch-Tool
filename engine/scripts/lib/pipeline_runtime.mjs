@@ -1,10 +1,3 @@
-import crypto from "node:crypto";
-import { execFile } from "node:child_process";
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { promisify } from "node:util";
-
 import {
   ASSET_BINDING_MARKERS,
   bindAssetPromptFields,
@@ -27,6 +20,29 @@ import {
   validatePngBytes,
   validateReferenceImageBytes,
 } from "./pipeline-runtime/image-validation.mjs";
+import {
+  IMAGE_BACKENDS,
+  MAX_EXCEL_CELL_CHARACTERS,
+  assertExcelCellValue,
+  attemptEntryFor,
+  canonicalJson,
+  canonicalSha256,
+  canonicalize,
+  cleanText,
+  hasExactKeys,
+  isObject,
+  latestJsonMtime,
+  neutralizeExcelFormula,
+  normalizeAttemptEntry,
+  normalizeAttemptLedger,
+  parseJsonText,
+  readJsonFile,
+  requiredFileInfo,
+  resolveImageOutputPath,
+  sha256,
+  stripBom,
+  writeJsonAtomic,
+} from "./pipeline-runtime/runtime-core.mjs";
 
 export {
   MAX_REFERENCE_IMAGE_BYTES,
@@ -41,6 +57,37 @@ export {
   validatePngBytes,
   validateReferenceImageBytes,
 };
+export {
+  IMAGE_BACKENDS,
+  MAX_EXCEL_CELL_CHARACTERS,
+  assertExcelCellValue,
+  attemptEntryFor,
+  canonicalJson,
+  canonicalSha256,
+  canonicalize,
+  cleanText,
+  hasExactKeys,
+  isObject,
+  latestJsonMtime,
+  neutralizeExcelFormula,
+  normalizeAttemptEntry,
+  normalizeAttemptLedger,
+  parseJsonText,
+  readJsonFile,
+  requiredFileInfo,
+  resolveImageOutputPath,
+  sha256,
+  stripBom,
+  writeJsonAtomic,
+};
+export {
+  PIPELINE_LOCK_PROTOCOL_VERSION,
+  acquirePipelineLock,
+  readPipelineLock,
+  releasePipelineLock,
+  requirePipelineLock,
+  rotatePipelineLock,
+} from "./pipeline-runtime/lock-protocol.mjs";
 
 const PROMPT_CATALOG = loadPromptCatalogSync();
 const COMPILED_LEGACY_PROMPT_DEFINITION = compileLegacyDefinition(PROMPT_CATALOG);
@@ -51,7 +98,6 @@ const RESOLVED_PROMPT_TEMPLATE_CACHE = new Map();
 export const IMAGE_SHEET_ORDER = Object.freeze([
   ...COMPILED_LEGACY_PROMPT_DEFINITION.sheetOrder,
 ]);
-export const IMAGE_BACKENDS = Object.freeze(["builtin", "api"]);
 export const BUILTIN_PROMPT_FIELD_ORDER = Object.freeze([
   ...COMPILED_LEGACY_PROMPT_DEFINITION.fieldOrder,
 ]);
@@ -96,191 +142,6 @@ export const ASSET_ID_PATTERNS = Object.freeze({
   道具: /^PROP-\d{3,}-EP[1-9]\d*$/,
 });
 export const MAX_IMAGE_ATTEMPTS = 2;
-export const MAX_EXCEL_CELL_CHARACTERS = 32_767;
-export const PIPELINE_LOCK_PROTOCOL_VERSION = 2;
-
-const execFileAsync = promisify(execFile);
-
-export const cleanText = (value) => String(value ?? "").trim();
-export const isObject = (value) => value && typeof value === "object" && !Array.isArray(value);
-const EXCEL_FORMULA_PREFIX = /^[\s\u0000-\u001f\u007f]*[=+\-@]/u;
-const INVALID_XML_TEXT_CONTROLS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/gu;
-export const neutralizeExcelFormula = (value) => {
-  if (typeof value !== "string") return value;
-  const xmlSafeValue = value.replace(INVALID_XML_TEXT_CONTROLS, "\uFFFD");
-  return EXCEL_FORMULA_PREFIX.test(value) ? `'${xmlSafeValue}` : xmlSafeValue;
-};
-export const assertExcelCellValue = (value, label = "Excel 单元格") => {
-  if (value === null || value === undefined) return value;
-  const safeValue = neutralizeExcelFormula(value);
-  if (String(safeValue).length > MAX_EXCEL_CELL_CHARACTERS) {
-    throw new Error(`${label}超过 Excel 单元格 ${MAX_EXCEL_CELL_CHARACTERS} 字符上限`);
-  }
-  return safeValue;
-};
-
-export const hasExactKeys = (value, expectedKeys) =>
-  isObject(value) &&
-  Object.keys(value).length === expectedKeys.length &&
-  expectedKeys.every((key) => Object.hasOwn(value, key));
-export const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
-export const stripBom = (value) => String(value ?? "").replace(/^\uFEFF/, "");
-
-export const canonicalize = (value) => {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (!isObject(value)) return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, canonicalize(value[key])]),
-  );
-};
-
-export const canonicalJson = (value) => JSON.stringify(canonicalize(value));
-export const canonicalSha256 = (value) => sha256(canonicalJson(value));
-
-export const normalizeAttemptEntry = (value) => {
-  if (!isObject(value) || !cleanText(value.inputFingerprint)) return null;
-  return {
-    inputFingerprint: cleanText(value.inputFingerprint),
-    attempts: Number.isInteger(value.attempts) && value.attempts >= 0 ? value.attempts : 0,
-    lastError: String(value.lastError ?? ""),
-    updatedAt: String(value.updatedAt ?? ""),
-  };
-};
-
-export const normalizeAttemptLedger = (state) => {
-  const ledger = {};
-  if (isObject(state?.attemptLedger)) {
-    for (const backend of IMAGE_BACKENDS) {
-      const entry = normalizeAttemptEntry(state.attemptLedger[backend]);
-      if (entry) ledger[backend] = entry;
-    }
-  }
-  const legacyBackend = state?.backend;
-  if (IMAGE_BACKENDS.includes(legacyBackend)) {
-    const inputFingerprint = cleanText(
-      legacyBackend === "builtin" ? state.builtinPromptFingerprint : state.inputFingerprint,
-    );
-    if (inputFingerprint && ledger[legacyBackend]?.inputFingerprint !== inputFingerprint) {
-      ledger[legacyBackend] = {
-        inputFingerprint,
-        attempts: Number.isInteger(state.attempts) && state.attempts >= 0 ? state.attempts : 0,
-        lastError: String(state.error ?? ""),
-        updatedAt: String(state.updatedAt ?? ""),
-      };
-    }
-  }
-  return ledger;
-};
-
-export const attemptEntryFor = (ledger, backend, inputFingerprint) => {
-  const current = normalizeAttemptEntry(ledger?.[backend]);
-  if (current?.inputFingerprint === inputFingerprint) return current;
-  return { inputFingerprint, attempts: 0, lastError: "", updatedAt: "" };
-};
-
-export const requiredFileInfo = async (filePath, label) => {
-  let stat;
-  try {
-    stat = await fs.stat(filePath);
-  } catch (error) {
-    if (error?.code === "ENOENT") throw new Error(`${label}不存在：${filePath}`);
-    throw error;
-  }
-  if (!stat.isFile()) throw new Error(`${label}不是文件：${filePath}`);
-  return stat;
-};
-
-export const latestJsonMtime = async (directory) => {
-  let entries;
-  try {
-    entries = await fs.readdir(directory, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === "ENOENT") return 0;
-    throw error;
-  }
-  const times = await Promise.all(
-    entries
-      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))
-      .map(async (entry) => (await fs.stat(path.join(directory, entry.name))).mtimeMs),
-  );
-  return times.length ? Math.max(...times) : 0;
-};
-
-export const resolveImageOutputPath = (skillRoot, imageOutputRoot, relativePath) => {
-  if (!cleanText(relativePath)) throw new Error("任务输出路径为空");
-  const absolute = path.resolve(skillRoot, relativePath);
-  if (!isPathWithinOrSame(absolute, imageOutputRoot)) {
-    throw new Error(`任务输出路径越出 输出/资产图：${relativePath}`);
-  }
-  return {
-    absolute,
-    relative: path.relative(skillRoot, absolute).split(path.sep).join("/"),
-  };
-};
-
-export const parseJsonText = (raw, label = "JSON") => {
-  try {
-    return JSON.parse(stripBom(raw));
-  } catch (error) {
-    throw new Error(`${label}不是有效 JSON：${error.message}`);
-  }
-};
-
-export const readJsonFile = async (filePath, options = {}) => {
-  const {
-    fallback,
-    allowEmpty = false,
-    label = path.basename(filePath),
-    retries = 0,
-  } = options;
-  const hasFallback = Object.hasOwn(options, "fallback");
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      const raw = await fs.readFile(filePath, "utf8");
-      if (allowEmpty && !stripBom(raw).trim()) return fallback;
-      return parseJsonText(raw, label);
-    } catch (error) {
-      if (error?.code === "ENOENT" && hasFallback) return fallback;
-      if (attempt === retries) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 30));
-    }
-  }
-  return fallback;
-};
-
-export const writeJsonAtomic = async (filePath, value) => {
-  const parentPath = path.dirname(filePath);
-  await fs.mkdir(parentPath, { recursive: true });
-  const parentStat = await fs.lstat(parentPath);
-  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
-    throw new Error(`JSON 写入目录不是安全的普通文件夹：${parentPath}`);
-  }
-  const tempPath = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  let handle;
-  try {
-    handle = await fs.open(tempPath, "wx", 0o600);
-    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    await fs.rename(tempPath, filePath);
-    let directoryHandle;
-    try {
-      directoryHandle = await fs.open(parentPath, "r");
-      await directoryHandle.sync();
-    } catch {
-      // Directory fsync is unavailable on some Windows filesystems.
-    } finally {
-      await directoryHandle?.close().catch(() => {});
-    }
-  } catch (error) {
-    await handle?.close().catch(() => {});
-    await fs.rm(tempPath, { force: true }).catch(() => {});
-    throw error;
-  }
-};
 
 export const validateImageRoutes = (config) => {
   if (
@@ -1141,191 +1002,3 @@ export const makeAssetFingerprint = (item) =>
 
 export const makeBuiltinPromptFingerprint = (assetFingerprint, promptSpec) =>
   sha256(JSON.stringify({ version: 1, assetFingerprint, promptSpec }));
-
-const currentProcessStartTime = new Date(Date.now() - process.uptime() * 1000).toISOString();
-const currentHost = os.hostname();
-
-const makeLockError = (lock) => {
-  const error = new Error(
-    `已有流水线任务占用：${lock?.kind ?? "unknown"}:${lock?.key ?? "unknown"}`,
-  );
-  error.code = "PIPELINE_LOCKED";
-  error.lock = lock;
-  return error;
-};
-
-const processExists = (processId) => {
-  try {
-    process.kill(processId, 0);
-    return true;
-  } catch (error) {
-    if (error?.code === "ESRCH") return false;
-    return null;
-  }
-};
-
-const windowsProcessStartTime = async (processId) => {
-  const command = [
-    "$ErrorActionPreference='Stop'",
-    `$p=[System.Diagnostics.Process]::GetProcessById(${processId})`,
-    "$p.StartTime.ToUniversalTime().ToString('o')",
-  ].join("; ");
-  try {
-    const { stdout } = await execFileAsync(
-      "powershell.exe",
-      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
-      { encoding: "utf8", timeout: 5000, windowsHide: true },
-    );
-    const value = cleanText(stdout);
-    return Number.isFinite(Date.parse(value)) ? value : null;
-  } catch {
-    return null;
-  }
-};
-
-const classifyTransientLockOwner = async (lock) => {
-  if (
-    lock?.protocolVersion !== PIPELINE_LOCK_PROTOCOL_VERSION ||
-    lock?.leaseMode !== "transient" ||
-    cleanText(lock?.host).toLocaleLowerCase() !== currentHost.toLocaleLowerCase() ||
-    !Number.isInteger(lock?.processId) ||
-    lock.processId < 1 ||
-    !Number.isFinite(Date.parse(lock?.processStartTime))
-  ) {
-    return "unknown";
-  }
-  const exists = processExists(lock.processId);
-  if (exists === false) return "dead";
-  if (exists !== true) return "unknown";
-
-  if (lock.processId === process.pid) {
-    return Math.abs(Date.parse(lock.processStartTime) - Date.parse(currentProcessStartTime)) <= 5000
-      ? "alive"
-      : "identity_mismatch";
-  }
-  if (process.platform !== "win32") return "unknown";
-  const actualStartTime = await windowsProcessStartTime(lock.processId);
-  if (!actualStartTime) return "unknown";
-  return Math.abs(Date.parse(lock.processStartTime) - Date.parse(actualStartTime)) <= 5000
-    ? "alive"
-    : "identity_mismatch";
-};
-
-export const readPipelineLock = async (lockPath) => {
-  const lock = await readJsonFile(lockPath, {
-    fallback: null,
-    label: "流水线锁",
-    retries: 2,
-  });
-  if (lock === null) return null;
-  if (!isObject(lock) || !cleanText(lock.kind) || !cleanText(lock.key)) {
-    throw new Error("流水线锁结构无效，禁止继续");
-  }
-  return lock;
-};
-
-const quarantineStaleLock = async (lockPath, expected) => {
-  const current = await readPipelineLock(lockPath);
-  if (!current || !cleanText(expected?.token) || current.token !== expected.token) {
-    throw makeLockError(current);
-  }
-  const quarantinePath = `${lockPath}.stale.${expected.token}.${crypto.randomUUID()}`;
-  try {
-    await fs.rename(lockPath, quarantinePath);
-  } catch (error) {
-    if (error?.code === "ENOENT") return;
-    throw makeLockError(await readPipelineLock(lockPath));
-  }
-  await fs.rm(quarantinePath, { force: true }).catch(() => {});
-};
-
-export const acquirePipelineLock = async (lockPath, payload) => {
-  const transactionPath = path.join(path.dirname(lockPath), ".pipeline.transaction.json");
-  if (await fs.stat(transactionPath).then((stat) => stat.isFile()).catch(() => false)) {
-    const error = new Error(
-      "检测到未恢复的 Cache 写入事务；禁止接管或启动其他流水线任务，请先重跑切分/同步脚本完成恢复",
-    );
-    error.code = "PIPELINE_TRANSACTION_PENDING";
-    throw error;
-  }
-  const now = new Date().toISOString();
-  const lock = {
-    ...payload,
-    protocolVersion: PIPELINE_LOCK_PROTOCOL_VERSION,
-    leaseMode: payload?.leaseMode === "transient" ? "transient" : "durable",
-    processId: process.pid,
-    processStartTime: currentProcessStartTime,
-    host: currentHost,
-    token: crypto.randomUUID(),
-    createdAt: now,
-    updatedAt: now,
-  };
-  await fs.mkdir(path.dirname(lockPath), { recursive: true });
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    let handle;
-    let created = false;
-    try {
-      handle = await fs.open(lockPath, "wx");
-      created = true;
-      await handle.writeFile(`${JSON.stringify(lock, null, 2)}\n`, "utf8");
-      await handle.sync();
-      await handle.close();
-      return lock;
-    } catch (error) {
-      await handle?.close().catch(() => {});
-      if (created) await fs.rm(lockPath, { force: true }).catch(() => {});
-      if (error?.code !== "EEXIST") throw error;
-      const existing = await readPipelineLock(lockPath);
-      if (attempt === 0) {
-        const state = await classifyTransientLockOwner(existing);
-        if (state === "dead" || state === "identity_mismatch") {
-          await quarantineStaleLock(lockPath, existing);
-          continue;
-        }
-      }
-      throw makeLockError(existing);
-    }
-  }
-  throw makeLockError(await readPipelineLock(lockPath));
-};
-
-export const rotatePipelineLock = async (lockPath, expected, payload = {}) => {
-  const current = await requirePipelineLock(lockPath, expected);
-  if (current.leaseMode !== "durable") {
-    throw new Error("只有 durable 流水线锁允许轮换会话令牌");
-  }
-  const now = new Date().toISOString();
-  const rotated = {
-    ...current,
-    ...payload,
-    protocolVersion: PIPELINE_LOCK_PROTOCOL_VERSION,
-    leaseMode: "durable",
-    processId: process.pid,
-    processStartTime: currentProcessStartTime,
-    host: currentHost,
-    token: crypto.randomUUID(),
-    createdAt: now,
-    updatedAt: now,
-    resumedFromTokenHash: sha256(current.token),
-  };
-  await writeJsonAtomic(lockPath, rotated);
-  return rotated;
-};
-
-export const requirePipelineLock = async (lockPath, expected) => {
-  const lock = await readPipelineLock(lockPath);
-  if (!lock) throw new Error("当前任务未持有流水线锁");
-  for (const [field, value] of Object.entries(expected)) {
-    if (value !== undefined && lock[field] !== value) {
-      throw new Error(`流水线锁不属于当前任务：${lock.kind}:${lock.key}`);
-    }
-  }
-  return lock;
-};
-
-export const releasePipelineLock = async (lockPath, expected) => {
-  const lock = await requirePipelineLock(lockPath, expected);
-  if (!cleanText(lock.token)) throw new Error("流水线锁缺少释放令牌，禁止自动删除");
-  await fs.unlink(lockPath);
-};
