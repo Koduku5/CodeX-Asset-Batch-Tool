@@ -516,16 +516,21 @@ test('batch classification stays in the formal batch panel and template drafts f
 test('Infinite Canvas opens both batch modes and automatically loads authenticated project and model lists', async () => {
   const app = await readUiSource();
   const runner = await read('engine/scripts/commands/start_api_batch.ps1');
+  const runnerContracts = await read('engine/scripts/commands/lib/api-batch-contracts.ps1');
+  const runnerState = await read('engine/scripts/commands/lib/api-batch-state.ps1');
+  const runnerForm = await read('engine/scripts/commands/lib/api-batch-form.ps1');
+  const runnerLaunch = await read('engine/scripts/commands/lib/api-batch-launch.ps1');
+  const runnerSource = [runner, runnerContracts, runnerState, runnerForm, runnerLaunch].join('\n');
 
   assert.match(app, /连接账号并读取项目 \/ 模型/u);
   assert.match(app, /const loadCatalog = window\.kaDesktopBridge\?\.loadApiCatalog/u);
   assert.match(app, /<Button[^>]*onClick=\{\(\) => void connectApiCatalog\(\)\}[^>]*>[\s\S]*?连接账号/u);
   assert.match(app, /window\.kaDesktopBridge\?\.startApiBatch/u);
-  assert.match(runner, /使用文件夹中的图片批量重绘/u);
-  assert.match(runner, /开始 API 批量出图/u);
-  assert.match(runner, /-Uri "\$baseUrl\/api\/v1\/models" `\s+-Headers \$headers/u);
-  assert.match(runner, /\$connectButton\.PerformClick\(\)/u);
-  assert.match(runner, /\$parsedWorkers = 0[\s\S]*?TryParse\([^\n]+\[ref\]\$parsedWorkers\)/u);
+  assert.match(runnerSource, /使用文件夹中的图片批量重绘/u);
+  assert.match(runnerSource, /开始 API 批量出图/u);
+  assert.match(runnerSource, /-Uri "\$baseUrl\/api\/v1\/models" `\s+-Headers \$headers/u);
+  assert.match(runnerSource, /\$connectButton\.PerformClick\(\)/u);
+  assert.match(runnerSource, /\$parsedWorkers = 0[\s\S]*?TryParse\([^\n]+\[ref\]\$parsedWorkers\)/u);
   assert.match(runner, /无限画板 API 启动失败/u);
 });
 
