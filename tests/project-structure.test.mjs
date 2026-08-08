@@ -25,6 +25,8 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'src/ui/features/prompt-studio/prompt-studio-drawer.tsx',
     'src/ui/services',
     'src/server/server.mjs',
+    'src/server/server-http.mjs',
+    'src/server/server-services.mjs',
     'src/server/routes/api-routes.mjs',
     'src/server/routes/desktop-routes.mjs',
     'src/server/routes/static-route.mjs',
