@@ -3,10 +3,16 @@ import * as React from "react"
 import {
   type JsonRecord,
   type ToastState,
+} from "@/features/workbench/workbench-types"
+import {
   catalogAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
   safeMessage,
+} from "@/features/workbench/workbench-utils"
+import {
   SHEETS,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-constants"
 
 type UseBatchApiStudioOptions = {
   backend: string

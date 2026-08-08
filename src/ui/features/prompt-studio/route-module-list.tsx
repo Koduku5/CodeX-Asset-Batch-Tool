@@ -7,12 +7,18 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import {
   EmptyState,
-  ROUTE_LIST_PAGE_SIZE,
   StatusDot,
+} from "@/features/workbench/workbench-primitives"
+import {
+  ROUTE_LIST_PAGE_SIZE,
+} from "@/features/workbench/workbench-constants"
+import {
   assetLabel,
   styleLabel,
+} from "@/features/workbench/workbench-utils"
+import {
   type RouteModule,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 
 export type RouteModuleListStudio = {
   branchImportRef: React.RefObject<HTMLInputElement | null>

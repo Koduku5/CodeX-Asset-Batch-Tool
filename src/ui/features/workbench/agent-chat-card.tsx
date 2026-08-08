@@ -25,8 +25,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   CODEX_MODEL_OPTIONS,
   CODEX_REASONING_OPTIONS,
+} from "@/features/workbench/workbench-constants"
+import {
   type JsonRecord,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 import { cn } from "@/lib/utils"
 
 export function AgentChatCard({

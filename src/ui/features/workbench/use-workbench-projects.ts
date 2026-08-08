@@ -2,13 +2,17 @@ import * as React from "react"
 
 import {
   controlAdapter,
+  workspaceAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
   projectNameFromScreenplay,
   safeMessage,
-  workspaceAdapter,
+} from "@/features/workbench/workbench-utils"
+import {
   type JsonRecord,
   type ProjectCard,
   type ToastState,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 
 type Notify = (message: string, tone?: ToastState["tone"]) => void
 

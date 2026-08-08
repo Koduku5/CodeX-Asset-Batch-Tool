@@ -6,12 +6,16 @@ import {
 import {
   clone,
   nowIso,
+} from "@/features/workbench/workbench-utils"
+import {
   routePresetModulesEqual,
   routePresetNameKey,
+} from "@/features/prompt-studio/prompt-preset-store"
+import {
   type PendingRouteImport,
   type RouteModule,
   type RoutePreset,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 
 type RouteImportMode = "preset" | "branch"
 type ParsedRouteArtifact = {

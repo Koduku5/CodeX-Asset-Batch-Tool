@@ -3,10 +3,14 @@ import { ChevronRight, FileText } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   EmptyState,
+} from "@/features/workbench/workbench-primitives"
+import {
   JsonRecord,
-  OPERATION_LABELS,
   RouteModule,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
+import {
+  OPERATION_LABELS,
+} from "@/features/workbench/workbench-constants"
 
 export function RouteFieldPreview({ module, preview }: { module: RouteModule; preview: JsonRecord | null }) {
   const previewDiffs: JsonRecord[] = Array.isArray(preview?.applied?.diff) ? preview.applied.diff : []

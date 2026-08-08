@@ -9,9 +9,13 @@ import {
   ASSETS,
   REFERENCE_MODES,
   STYLES,
+} from "@/features/workbench/workbench-constants"
+import {
   SectionHeading,
+} from "@/features/workbench/workbench-primitives"
+import {
   type RouteModule,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 
 export function RouteModuleSettings({ commitModule, module }: {
   commitModule: (next: RouteModule) => void

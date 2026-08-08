@@ -31,13 +31,19 @@ import { useWorkbenchTasks } from "@/features/workbench/use-workbench-tasks"
 import {
   JsonRecord,
   ToastState,
+} from "@/features/workbench/workbench-types"
+import {
   controlAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
   PHASE_LABELS,
   CURRENT_STAGE_LABELS,
   TASK_STAGE_BY_ACTION,
+} from "@/features/workbench/workbench-constants"
+import {
   safeMessage,
   percent,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-utils"
 
 import { MemoPromptStudioDrawer } from "@/features/prompt-studio/prompt-studio-drawer"
 

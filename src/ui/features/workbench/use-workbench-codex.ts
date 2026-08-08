@@ -3,10 +3,14 @@ import * as React from "react"
 import {
   codexAgentChatAdapter,
   codexStatusAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
   safeMessage,
+} from "@/features/workbench/workbench-utils"
+import {
   type JsonRecord,
   type ToastState,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 
 type Notify = (message: string, tone?: ToastState["tone"]) => void
 

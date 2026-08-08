@@ -5,7 +5,9 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { templateDraftRecords } from "@/features/prompt-studio/template-drafts.mjs"
-import type { RoutePreset } from "@/features/workbench/workbench-foundation"
+import {
+  type RoutePreset,
+} from "@/features/workbench/workbench-types"
 
 export type RoutePresetsPanelStudio = {
   activePreset: RoutePreset | null

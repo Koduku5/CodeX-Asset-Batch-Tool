@@ -3,12 +3,16 @@ import * as React from "react"
 import { formatPromptText } from "@/services/catalog-adapter.mjs"
 import {
   assetLabel,
-  catalogAdapter,
-  JsonRecord,
   safeMessage,
   styleLabel,
+} from "@/features/workbench/workbench-utils"
+import {
+  catalogAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
+  JsonRecord,
   ToastState,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 
 type Notify = (message: string, tone?: ToastState["tone"]) => void
 

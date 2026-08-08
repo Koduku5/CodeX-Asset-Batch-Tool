@@ -5,10 +5,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { BatchBackendSelector } from "@/features/prompt-studio/batch-backend-selector"
 import {
   STYLES,
+} from "@/features/workbench/workbench-constants"
+import {
   StatusDot,
+} from "@/features/workbench/workbench-primitives"
+import {
   formatCount,
+} from "@/features/workbench/workbench-utils"
+import {
   type JsonRecord,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 
 export function BatchStudioToolbar({ backend, generationLimit, handoff, onBackendChange, onGenerationLimitChange, onStyleChange, style }: {
   backend: string

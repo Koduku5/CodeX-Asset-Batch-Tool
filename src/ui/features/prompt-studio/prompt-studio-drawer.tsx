@@ -32,14 +32,20 @@ import { ValidationStudio } from "@/features/prompt-studio/validation-studio"
 import {
   RoutePreset,
   ToastState,
+  PromptPresetContextValue,
+} from "@/features/workbench/workbench-types"
+import {
   ACTIVE_PRESET_STORAGE_KEY,
+} from "@/features/workbench/workbench-constants"
+import {
   readStoredPresets,
   savePresets,
-  PromptPresetContextValue,
   PromptPresetContext,
   readActivePresetId,
+} from "@/features/prompt-studio/prompt-preset-store"
+import {
   EmptyState,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-primitives"
 
 type DrawerProps = {
   className?: string

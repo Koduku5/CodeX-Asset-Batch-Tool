@@ -7,7 +7,9 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import type { BatchApiStudio } from "@/features/prompt-studio/use-batch-api-studio"
-import { SHEETS } from "@/features/workbench/workbench-foundation"
+import {
+  SHEETS,
+} from "@/features/workbench/workbench-constants"
 
 type BatchApiWorkspaceProps = {
   loading: boolean

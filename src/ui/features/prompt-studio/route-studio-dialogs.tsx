@@ -22,7 +22,11 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { JsonRecord, PendingRouteImport, RouteModule } from "@/features/workbench/workbench-foundation"
+import {
+  type JsonRecord,
+  type PendingRouteImport,
+  type RouteModule,
+} from "@/features/workbench/workbench-types"
 
 export type RouteDialogStudio = {
   applyImportedArtifacts: (incoming: PendingRouteImport) => void

@@ -2,12 +2,18 @@ import * as React from "react"
 
 import {
   ACTIVE_TASK_STATUSES,
+} from "@/features/workbench/workbench-constants"
+import {
   controlAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
   safeMessage,
   taskFailureSummary,
+} from "@/features/workbench/workbench-utils"
+import {
   type JsonRecord,
   type ToastState,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 
 type Notify = (message: string, tone?: ToastState["tone"]) => void
 

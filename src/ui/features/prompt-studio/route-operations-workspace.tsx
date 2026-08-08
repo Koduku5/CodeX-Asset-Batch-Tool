@@ -8,10 +8,14 @@ import { Textarea } from "@/components/ui/textarea"
 import { RouteFieldPreview } from "@/features/prompt-studio/route-field-preview"
 import {
   JsonRecord,
-  OPERATION_LABELS,
-  SectionHeading,
   type RouteModule,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
+import {
+  OPERATION_LABELS,
+} from "@/features/workbench/workbench-constants"
+import {
+  SectionHeading,
+} from "@/features/workbench/workbench-primitives"
 import { DEFAULT_ALLOWED_TARGET_FIELDS } from "@/services/route-module-workbench.mjs"
 
 export function RouteOperationsWorkspace({ busy, commitModule, module, preview, resolvePreview }: {

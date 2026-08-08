@@ -5,11 +5,15 @@ import {
   type JsonRecord,
   type RouteModule,
   type ToastState,
+} from "@/features/workbench/workbench-types"
+import {
   catalogAdapter,
   routeClassifierAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
   safeMessage,
   uniqueId,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-utils"
 
 type UseRouteClassificationOptions = {
   catalogStatus: JsonRecord | null

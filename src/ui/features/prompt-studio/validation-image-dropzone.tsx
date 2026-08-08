@@ -2,7 +2,9 @@ import * as React from "react"
 import { ImagePlus } from "lucide-react"
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { SectionHeading } from "@/features/workbench/workbench-foundation"
+import {
+  SectionHeading,
+} from "@/features/workbench/workbench-primitives"
 
 type ValidationImageDropzoneProps = {
   image: { url: string; name: string } | null

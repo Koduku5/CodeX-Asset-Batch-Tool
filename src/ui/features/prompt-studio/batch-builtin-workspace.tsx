@@ -11,12 +11,20 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import {
   type JsonRecord,
+} from "@/features/workbench/workbench-types"
+import {
   REFERENCE_MODES,
   SHEETS,
+} from "@/features/workbench/workbench-constants"
+import {
   SectionHeading,
+} from "@/features/workbench/workbench-primitives"
+import {
   batchAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
   styleLabel,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-utils"
 
 export type BatchBuiltinStudio = {
   activePreviewReference: JsonRecord | null

@@ -16,11 +16,17 @@ import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   PHASE_LABELS,
+} from "@/features/workbench/workbench-constants"
+import {
   StatusDot,
+} from "@/features/workbench/workbench-primitives"
+import {
   formatDuration,
   formatTime,
+} from "@/features/workbench/workbench-utils"
+import {
   type JsonRecord,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 import { cn } from "@/lib/utils"
 
 export function WorkbenchStatusBar({

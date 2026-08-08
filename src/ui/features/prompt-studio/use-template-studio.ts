@@ -8,12 +8,18 @@ import {
 import { readTemplateDraft, withTemplateDraft } from "@/features/prompt-studio/template-drafts.mjs"
 import {
   catalogAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
   JsonRecord,
+  ToastState,
+} from "@/features/workbench/workbench-types"
+import {
   nowIso,
   safeMessage,
-  ToastState,
+} from "@/features/workbench/workbench-utils"
+import {
   usePromptPresets,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/prompt-studio/prompt-preset-store"
 
 type Notify = (message: string, tone?: ToastState["tone"]) => void
 

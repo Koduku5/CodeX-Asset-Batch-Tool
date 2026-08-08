@@ -15,10 +15,14 @@ import { formatPromptText, makeRouteTrace } from "@/services/catalog-adapter.mjs
 import {
   ASSETS,
   REFERENCE_MODES,
-  SectionHeading,
   STYLES,
+} from "@/features/workbench/workbench-constants"
+import {
+  SectionHeading,
+} from "@/features/workbench/workbench-primitives"
+import {
   ToastState,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 
 type ValidationStudioProps = {
   projectName: string | null

@@ -3,10 +3,14 @@ import * as React from "react"
 import { saveStageTimingsWithRetry } from "@/services/stage-timing-persistence.mjs"
 import {
   controlAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
   safeMessage,
+} from "@/features/workbench/workbench-utils"
+import {
   type JsonRecord,
   type ToastState,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 
 type StageTimings = Record<string, number>
 type StageElapsedSeconds = Record<string, StageTimings>

@@ -7,12 +7,18 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import {
   ACTIVE_TASK_STATUSES,
   PHASE_LABELS,
+} from "@/features/workbench/workbench-constants"
+import {
   SectionHeading,
   StatusDot,
+} from "@/features/workbench/workbench-primitives"
+import {
   formatCount,
+} from "@/features/workbench/workbench-utils"
+import {
   type JsonRecord,
   type ProjectCard,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 import { cn } from "@/lib/utils"
 
 export type WorkbenchProjectPanelStudio = {

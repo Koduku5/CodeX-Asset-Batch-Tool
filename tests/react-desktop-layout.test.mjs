@@ -22,7 +22,6 @@ const readUiFiles = async (relativeDirectory = 'src/ui') => {
 const readUiSource = async () => (await readUiFiles()).map(({ source }) => source).join('\n');
 
 const readWorkbenchSource = async () => (await Promise.all([
-  read('src/ui/features/workbench/workbench-foundation.tsx'),
   read('src/ui/features/workbench/workbench-types.ts'),
   read('src/ui/features/workbench/workbench-adapters.ts'),
   read('src/ui/features/workbench/workbench-constants.ts'),
@@ -187,9 +186,8 @@ test('pending asset review separates model rules, record editing, and dialog orc
   assert.match(records, /export function RecordPreview[\s\S]*export function FinalRecordEditor/u);
 });
 
-test('workbench separates Agent chat and project dialogs from shared foundation and app orchestration', async () => {
+test('workbench separates controllers, shared domains and app orchestration', async () => {
   const app = await read('src/ui/features/workbench/workbench-app.tsx');
-  const foundation = await read('src/ui/features/workbench/workbench-foundation.tsx');
   const adapters = await read('src/ui/features/workbench/workbench-adapters.ts');
   const constants = await read('src/ui/features/workbench/workbench-constants.ts');
   const primitives = await read('src/ui/features/workbench/workbench-primitives.tsx');
@@ -217,8 +215,6 @@ test('workbench separates Agent chat and project dialogs from shared foundation 
   assert.match(app, /useWorkbenchProjects\(\{/u);
   assert.match(app, /useWorkbenchStageTimings\(\{/u);
   assert.match(app, /useWorkbenchTasks\(\{/u);
-  assert.doesNotMatch(foundation, /function AgentChatCard|Agent 输入配置与发送|new ProjectWorkspaceAdapter|export const STYLES|function StatusDot/u);
-  assert.match(foundation, /export \* from "@\/features\/workbench\/workbench-types"[\s\S]*export \* from "@\/features\/prompt-studio\/prompt-preset-store"/u);
   assert.doesNotMatch(app, /<Dialog open=|<AlertDialog open=|<Progress|id="active-task-log"|Codex SDK 授权状态检测|title="项目任务"|saveStageTimingsWithRetry|stageTimingSaveQueues|codexAgentChatAdapter|watchedAgentChatIds|workspaceAdapter\.listProjects|controlAdapter\.createProject|controlAdapter\.getTask|controlAdapter\.listTasks/u);
   assert.match(agentChat, /export function AgentChatCard/u);
   assert.match(pipelineOverview, /export function WorkbenchPipelineOverview/u);

@@ -11,10 +11,16 @@ import {
 import { Card, CardContent } from "@/components/ui/card"
 import {
   ASSETS,
+} from "@/features/workbench/workbench-constants"
+import {
   SectionHeading,
+} from "@/features/workbench/workbench-primitives"
+import {
   formatCount,
+} from "@/features/workbench/workbench-utils"
+import {
   type JsonRecord,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 
 export function PendingAssetBanner({ count, projectAvailable, open }: {
   count: number

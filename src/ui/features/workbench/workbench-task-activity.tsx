@@ -15,9 +15,13 @@ import { Card, CardContent } from "@/components/ui/card"
 import {
   ACTIVE_TASK_STATUSES,
   TASK_STATUS_LABELS,
+} from "@/features/workbench/workbench-constants"
+import {
   taskFailureSummary,
+} from "@/features/workbench/workbench-utils"
+import {
   type JsonRecord,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 import { cn } from "@/lib/utils"
 
 export type WorkbenchTaskActivityStudio = {

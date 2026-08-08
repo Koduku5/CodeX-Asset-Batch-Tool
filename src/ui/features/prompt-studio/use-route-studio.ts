@@ -12,21 +12,29 @@ import {
 } from "@/services/route-module-workbench.mjs"
 import {
   JsonRecord,
-  ROUTE_LIST_PAGE_SIZE,
   RouteModule,
   ToastState,
+} from "@/features/workbench/workbench-types"
+import {
+  ROUTE_LIST_PAGE_SIZE,
+} from "@/features/workbench/workbench-constants"
+import {
   catalogAdapter,
+  routeAdminAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
   clone,
   downloadJson,
   nowIso,
-  readStoredPresets,
-  routeAdminAdapter,
-  routeModulesFromCatalogSummary,
   safeMessage,
   uniqueId,
+} from "@/features/workbench/workbench-utils"
+import {
+  readStoredPresets,
+  routeModulesFromCatalogSummary,
   usePromptPresets,
   withoutRetiredCatalogEnhancers,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/prompt-studio/prompt-preset-store"
 
 type UseRouteStudioOptions = {
   notify: (message: string, tone?: ToastState["tone"]) => void

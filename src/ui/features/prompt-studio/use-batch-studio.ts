@@ -4,20 +4,30 @@ import { buildBuiltinBatchConfiguration } from "@/features/prompt-studio/batch-c
 import { useBatchApiStudio } from "@/features/prompt-studio/use-batch-api-studio"
 import {
   ASSETS,
-  JsonRecord,
   SHEETS,
+} from "@/features/workbench/workbench-constants"
+import {
+  JsonRecord,
   ToastState,
+} from "@/features/workbench/workbench-types"
+import {
   batchAdapter,
+  catalogAdapter,
+  imagegenAdapter,
+} from "@/features/workbench/workbench-adapters"
+import {
   blankCustomReferenceFields,
   blankReferenceModes,
   blankReferenceSelections,
-  catalogAdapter,
-  imagegenAdapter,
   readBatchCustomFields,
-  safeMessage,
-  usePromptPresets,
   writeBatchCustomFields,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/prompt-studio/batch-custom-fields"
+import {
+  safeMessage,
+} from "@/features/workbench/workbench-utils"
+import {
+  usePromptPresets,
+} from "@/features/prompt-studio/prompt-preset-store"
 
 type UseBatchStudioOptions = {
   notify: (message: string, tone?: ToastState["tone"]) => void

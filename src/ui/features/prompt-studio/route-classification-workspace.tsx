@@ -10,14 +10,20 @@ import { Textarea } from "@/components/ui/textarea"
 import type { RouteClassificationStudio } from "@/features/prompt-studio/use-route-classification"
 import {
   ASSETS,
-  JsonRecord,
   REFERENCE_MODES,
   STYLES,
-  SectionHeading,
-  routeClassifierAdapter,
+} from "@/features/workbench/workbench-constants"
+import {
+  JsonRecord,
   type RouteModule,
   type ToastState,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
+import {
+  SectionHeading,
+} from "@/features/workbench/workbench-primitives"
+import {
+  routeClassifierAdapter,
+} from "@/features/workbench/workbench-adapters"
 import { formatPromptText } from "@/services/catalog-adapter.mjs"
 
 export function RouteClassificationWorkspace({ busy, module, notify, studio }: {

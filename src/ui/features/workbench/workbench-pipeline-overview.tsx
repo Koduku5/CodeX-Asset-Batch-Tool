@@ -6,10 +6,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import {
   STATE_LABELS,
+} from "@/features/workbench/workbench-constants"
+import {
   StatusDot,
+} from "@/features/workbench/workbench-primitives"
+import {
   formatDuration,
+} from "@/features/workbench/workbench-utils"
+import {
   type JsonRecord,
-} from "@/features/workbench/workbench-foundation"
+} from "@/features/workbench/workbench-types"
 import { cn } from "@/lib/utils"
 
 export type WorkbenchPipelineOverviewStudio = {
