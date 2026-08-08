@@ -426,7 +426,15 @@ test('IDs, DTOs, envelopes, project binding, revision results, and directory kin
 });
 
 test('the workspace module has no persistence, queue, prompt, credential, path, or object-URL storage channel', async () => {
-  const source = await readFile(new URL('../src/ui/services/project-workspace.mjs', import.meta.url), 'utf8');
+  const modulePaths = [
+    '../src/ui/services/project-workspace.mjs',
+    '../src/ui/services/project-workspace-contracts.mjs',
+    '../src/ui/services/project-workspace-state.mjs',
+    '../src/ui/services/project-workspace-adapter.mjs',
+  ];
+  const source = (await Promise.all(
+    modulePaths.map((modulePath) => readFile(new URL(modulePath, import.meta.url), 'utf8')),
+  )).join('\n');
   for (const forbidden of ['localStorage', 'sessionStorage', 'createObjectURL', 'revokeObjectURL', 'writeFile', 'queuePath', 'credential', 'apiToken']) {
     assert.equal(source.includes(forbidden), false, `unexpected persistence capability: ${forbidden}`);
   }
