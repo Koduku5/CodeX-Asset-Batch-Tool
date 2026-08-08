@@ -23,7 +23,7 @@ import { AssetOverview, PendingAssetBanner, PromptStudioLauncher } from "@/featu
 import { WorkbenchProjectDialogs } from "@/features/workbench/workbench-project-dialogs"
 import { CodexStatusCard, WorkbenchStatusBar } from "@/features/workbench/workbench-status-bar"
 import { WorkbenchTaskActivity } from "@/features/workbench/workbench-task-activity"
-import { saveStageTimingsWithRetry } from "@/services/stage-timing-persistence.mjs"
+import { useWorkbenchStageTimings } from "@/features/workbench/use-workbench-stage-timings"
 
 import {
   JsonRecord,
@@ -44,9 +44,6 @@ import {
 } from "@/features/workbench/workbench-foundation"
 
 import { MemoPromptStudioDrawer } from "@/features/prompt-studio/prompt-studio-drawer"
-
-type StageTimings = Record<string, number>
-type StageElapsedSeconds = Record<string, StageTimings>
 
 export default function App() {
   const { resolvedTheme, setTheme } = useTheme()
@@ -70,15 +67,6 @@ export default function App() {
   const [deleteProjectOpen, setDeleteProjectOpen] = React.useState(false)
   const [busyAction, setBusyAction] = React.useState<string | null>(null)
   const [tasks, setTasks] = React.useState<Record<string, JsonRecord>>({})
-  const [clockNow, setClockNow] = React.useState(() => Date.now())
-  const [activeStageTiming, setActiveStageTiming] = React.useState<{
-    key: string
-    projectId: string
-    stageId: string
-    startedAt: number
-    accumulatedSeconds: number
-  } | null>(null)
-  const [stageElapsedSeconds, setStageElapsedSeconds] = React.useState<StageElapsedSeconds>({})
   const [taskLogOpen, setTaskLogOpen] = React.useState(false)
   const [dismissedFailureTaskIds, setDismissedFailureTaskIds] = React.useState<string[]>([])
   const [codexStatus, setCodexStatus] = React.useState<JsonRecord | null>(null)
@@ -98,17 +86,18 @@ export default function App() {
   const watchedTaskIds = React.useRef(new Set<string>())
   const watchedAgentChatIds = React.useRef(new Set<string>())
   const promptedPendingStates = React.useRef(new Set<string>())
-  const loadedStageTimingProjectIds = React.useRef(new Set<string>())
-  const stageTimingLoadPromises = React.useRef(new Map<string, Promise<StageTimings>>())
-  const savedStageTimingSignatures = React.useRef(new Map<string, string>())
-  const stageTimingSaveQueues = React.useRef(new Map<string, Promise<unknown>>())
-  const stageTimingSaveWarningProjectIds = React.useRef(new Set<string>())
 
   const activeProject = projects.find((project) => project.projectId === activeProjectId) ?? null
   const activeTask = activeProjectId ? tasks[activeProjectId] ?? null : null
   const activeProjectHasRunningTask = ACTIVE_TASK_STATUSES.has(String(activeTask?.status))
   const activeTaskActuallyRunning = ["running", "pausing"].includes(String(activeTask?.status))
     && Number.isFinite(Date.parse(String(activeTask?.startedAt ?? "")))
+  const rawPipelinePhase = snapshot?.pipeline?.phase ?? activeProject?.statusSummary?.phase ?? "split"
+  const activeTaskStageId = activeProjectHasRunningTask
+    ? activeTask?.action === "run-full-pipeline" || activeTask?.action === "build-scoped-workbook"
+      ? rawPipelinePhase === "waiting-generation" || rawPipelinePhase === "complete" ? "excel" : rawPipelinePhase
+      : TASK_STAGE_BY_ACTION[activeTask?.action]
+    : null
   const codexConnected = codexStatus?.connected === true
   const activeAgentChat = activeProjectId ? agentChatSessions[activeProjectId] ?? null : null
   const activeAgentChatDraft = activeProjectId ? agentChatDrafts[activeProjectId] ?? "" : ""
@@ -125,23 +114,20 @@ export default function App() {
     }
   }, [])
 
-  const loadStageTimings = React.useCallback((projectId: string) => {
-    const existing = stageTimingLoadPromises.current.get(projectId)
-    if (existing) return existing
-    const current = controlAdapter.getStageTimings({ projectId }).then((result) => {
-      const stages = { ...result.stages }
-      loadedStageTimingProjectIds.current.add(projectId)
-      savedStageTimingSignatures.current.set(projectId, JSON.stringify(stages))
-      setStageElapsedSeconds((items) => ({ ...items, [projectId]: stages }))
-      return stages
-    }).finally(() => {
-      if (stageTimingLoadPromises.current.get(projectId) === current) {
-        stageTimingLoadPromises.current.delete(projectId)
-      }
-    })
-    stageTimingLoadPromises.current.set(projectId, current)
-    return current
-  }, [])
+  const {
+    activeStageElapsedSeconds,
+    getProjectStageTimings,
+    projectElapsedSeconds,
+    removeProjectStageTimings,
+    resetProjectStageTimings,
+    stageElapsedSeconds,
+  } = useWorkbenchStageTimings({
+    activeProjectId,
+    activeTask,
+    activeTaskActuallyRunning,
+    activeTaskStageId,
+    notify,
+  })
 
   const checkCodexStatus = React.useCallback(async ({ quiet = false } = {}) => {
     setCodexChecking(true)
@@ -435,11 +421,7 @@ export default function App() {
         delete next[projectId]
         return next
       })
-      setStageElapsedSeconds((items) => {
-        const next = { ...items }
-        delete next[projectId]
-        return next
-      })
+      removeProjectStageTimings(projectId)
       setActiveProjectId((current) => current === projectId ? remaining[0]?.projectId ?? null : current)
       setSnapshot(null)
       setDeleteProjectOpen(false)
@@ -518,9 +500,7 @@ export default function App() {
     if (!activeProjectId || ACTIVE_TASK_STATUSES.has(String(activeTask?.status))) return false
     setBusyAction(action)
     try {
-      const savedProjectTiming = loadedStageTimingProjectIds.current.has(activeProjectId)
-        ? stageElapsedSeconds[activeProjectId] ?? {}
-        : await loadStageTimings(activeProjectId)
+      const savedProjectTiming = await getProjectStageTimings(activeProjectId)
       const task = await controlAdapter.startTask({
         projectId: activeProjectId,
         action,
@@ -534,7 +514,7 @@ export default function App() {
       const resumesInterruptedRun = ["paused", "failed"].includes(String(activeTask?.status))
         || resumesAfterDesktopRestart
       if (!resumesInterruptedRun && ["run-full-pipeline", "build-scoped-workbook", "analyze-screenplay", "split"].includes(action)) {
-        setStageElapsedSeconds((items) => ({ ...items, [activeProjectId]: {} }))
+        resetProjectStageTimings(activeProjectId)
       }
       setTasks((items) => ({ ...items, [activeProjectId]: task }))
       notify("任务已进入当前项目的独立队列")
@@ -546,7 +526,7 @@ export default function App() {
     } finally {
       setBusyAction(null)
     }
-  }, [activeProject?.statusSummary?.phase, activeProjectId, activeTask?.status, loadStageTimings, notify, snapshot?.pipeline?.phase, stageElapsedSeconds, watchTask])
+  }, [activeProject?.statusSummary?.phase, activeProjectId, activeTask?.status, getProjectStageTimings, notify, resetProjectStageTimings, snapshot?.pipeline?.phase, watchTask])
 
   const pauseCurrentTask = React.useCallback(async () => {
     if (!activeProjectId || !activeTask?.taskId || !["queued", "running"].includes(activeTask.status)) return false
@@ -679,15 +659,6 @@ export default function App() {
   }, [activeProjectHasRunningTask, confirmedAgentProposalIds, notify, pauseCurrentTask, refreshProjects, runTask])
 
   React.useEffect(() => {
-    if (!activeProjectId || loadedStageTimingProjectIds.current.has(activeProjectId)) return
-    let cancelled = false
-    void loadStageTimings(activeProjectId).catch((error) => {
-      if (!cancelled) notify(safeMessage(error, "阶段用时读取失败"), "warning")
-    })
-    return () => { cancelled = true }
-  }, [activeProjectId, loadStageTimings, notify])
-
-  React.useEffect(() => {
     if (!activeProjectId) return
     let cancelled = false
     void controlAdapter.listTasks({ projectId: activeProjectId }).then(({ tasks: projectTasks }) => {
@@ -756,19 +727,9 @@ export default function App() {
   const pendingAssetsReady = pendingAssetCount > 0
     && pipelineStages.find((stage: JsonRecord) => stage.id === "analysis")?.state === "complete"
     && pipelineStages.find((stage: JsonRecord) => stage.id === "world-overview")?.state === "complete"
-  const rawPipelinePhase = snapshot?.pipeline?.phase ?? summary.phase ?? "split"
   const startTaskAction = pendingAssetCount === 0 && rawPipelinePhase === "asset-visual-specs"
     ? "finalize-after-confirmation"
     : "run-full-pipeline"
-  const activeTaskStageId = activeProjectHasRunningTask
-    ? activeTask?.action === "run-full-pipeline" || activeTask?.action === "build-scoped-workbook"
-      ? rawPipelinePhase === "waiting-generation" || rawPipelinePhase === "complete" ? "excel" : rawPipelinePhase
-      : TASK_STAGE_BY_ACTION[activeTask?.action]
-    : null
-  const projectStageElapsedSeconds = activeProjectId ? stageElapsedSeconds[activeProjectId] : null
-  const projectElapsedSeconds = activeProjectId && loadedStageTimingProjectIds.current.has(activeProjectId)
-    ? Object.values(projectStageElapsedSeconds ?? {}).reduce((total, seconds) => total + seconds, 0)
-    : undefined
   const displayPipelineStages = pipelineStages.map((stage: JsonRecord) => {
     if (activeTask?.status === "paused" && stage.state === "active") return { ...stage, state: "warning" }
     if (!activeTaskActuallyRunning && stage.state === "active") return { ...stage, state: "waiting" }
@@ -819,110 +780,6 @@ export default function App() {
   const showSummaryProgressPercent = currentPipelinePhase === "complete"
     || !activePipelineStage
     || activeStageProgress !== null
-
-  React.useEffect(() => {
-    if (!activeTaskActuallyRunning) return
-    setClockNow(Date.now())
-    const timer = window.setInterval(() => setClockNow(Date.now()), 1000)
-    return () => window.clearInterval(timer)
-  }, [activeTaskActuallyRunning, activeTask?.taskId])
-
-  React.useEffect(() => {
-    if (!activeStageTiming) return
-    const isSameStageStillRunning = activeTaskActuallyRunning
-      && activeProjectId === activeStageTiming.projectId
-      && activeTaskStageId === activeStageTiming.stageId
-      && activeTask?.taskId
-      && activeStageTiming.key === `${activeTask.taskId}:${activeTaskStageId}`
-    if (isSameStageStillRunning) return
-
-    const elapsedSeconds = activeStageTiming.accumulatedSeconds
-      + Math.max(0, Math.floor((Date.now() - activeStageTiming.startedAt) / 1000))
-    setStageElapsedSeconds((items) => ({
-      ...items,
-      [activeStageTiming.projectId]: {
-        ...items[activeStageTiming.projectId],
-        [activeStageTiming.stageId]: elapsedSeconds,
-      },
-    }))
-  }, [activeProjectId, activeStageTiming, activeTask?.taskId, activeTaskActuallyRunning, activeTaskStageId])
-
-  React.useEffect(() => {
-    if (!activeProjectId
-      || !loadedStageTimingProjectIds.current.has(activeProjectId)
-      || !activeTaskActuallyRunning
-      || !activeTaskStageId
-      || !activeTask?.taskId) {
-      setActiveStageTiming(null)
-      return
-    }
-    const key = `${activeTask.taskId}:${activeTaskStageId}`
-    setActiveStageTiming((current) => {
-      const stageId = String(activeTaskStageId)
-      const savedElapsedSeconds = stageElapsedSeconds[activeProjectId]?.[stageId] ?? 0
-      if (current?.key === key) {
-        const currentElapsedSeconds = current.accumulatedSeconds
-          + Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000))
-        return savedElapsedSeconds > currentElapsedSeconds
-          ? { ...current, startedAt: Date.now(), accumulatedSeconds: savedElapsedSeconds }
-          : current
-      }
-      return {
-        key,
-        projectId: activeProjectId,
-        stageId,
-        startedAt: Date.now(),
-        accumulatedSeconds: savedElapsedSeconds,
-      }
-    })
-  }, [activeProjectId, activeTask?.taskId, activeTaskActuallyRunning, activeTaskStageId, stageElapsedSeconds])
-
-  const activeStageElapsedSeconds = activeStageTiming
-    ? activeStageTiming.accumulatedSeconds
-      + Math.max(0, Math.floor((clockNow - activeStageTiming.startedAt) / 1000))
-    : null
-
-  React.useEffect(() => {
-    if (!activeStageTiming) return
-    const elapsedSeconds = activeStageTiming.accumulatedSeconds
-      + Math.max(0, Math.floor((clockNow - activeStageTiming.startedAt) / 1000))
-    setStageElapsedSeconds((items) => {
-      if (items[activeStageTiming.projectId]?.[activeStageTiming.stageId] === elapsedSeconds) return items
-      return {
-        ...items,
-        [activeStageTiming.projectId]: {
-          ...items[activeStageTiming.projectId],
-          [activeStageTiming.stageId]: elapsedSeconds,
-        },
-      }
-    })
-  }, [activeStageTiming, clockNow])
-
-  React.useEffect(() => {
-    for (const [projectId, stages] of Object.entries(stageElapsedSeconds)) {
-      if (!loadedStageTimingProjectIds.current.has(projectId)) continue
-      const signature = JSON.stringify(stages)
-      if (savedStageTimingSignatures.current.get(projectId) === signature) continue
-      savedStageTimingSignatures.current.set(projectId, signature)
-      const prior = stageTimingSaveQueues.current.get(projectId) ?? Promise.resolve()
-      const current = prior.catch(() => undefined)
-        .then(() => saveStageTimingsWithRetry(controlAdapter, projectId, stages))
-        .then(() => { stageTimingSaveWarningProjectIds.current.delete(projectId) })
-        .catch((error) => {
-          if (savedStageTimingSignatures.current.get(projectId) === signature) {
-            savedStageTimingSignatures.current.delete(projectId)
-          }
-          if (!stageTimingSaveWarningProjectIds.current.has(projectId)) {
-            stageTimingSaveWarningProjectIds.current.add(projectId)
-            notify(safeMessage(error, "阶段用时保存失败"), "warning")
-          }
-        })
-        .finally(() => {
-          if (stageTimingSaveQueues.current.get(projectId) === current) stageTimingSaveQueues.current.delete(projectId)
-        })
-      stageTimingSaveQueues.current.set(projectId, current)
-    }
-  }, [notify, stageElapsedSeconds])
 
   React.useEffect(() => {
     if (!activeProjectId) return

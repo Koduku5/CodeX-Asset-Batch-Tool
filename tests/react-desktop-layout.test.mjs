@@ -24,6 +24,7 @@ const readUiSource = async () => (await readUiFiles()).map(({ source }) => sourc
 const readWorkbenchSource = async () => (await Promise.all([
   read('src/ui/features/workbench/workbench-foundation.tsx'),
   read('src/ui/features/workbench/workbench-app.tsx'),
+  read('src/ui/features/workbench/use-workbench-stage-timings.ts'),
   read('src/ui/features/workbench/workbench-status-bar.tsx'),
   read('src/ui/features/workbench/workbench-project-panel.tsx'),
   read('src/ui/features/workbench/workbench-pipeline-overview.tsx'),
@@ -96,17 +97,17 @@ test('React desktop shell preserves the production-first single-column layout', 
   assert.match(app, /<Card className="gap-3 py-4 shadow-panel">/u);
   assert.match(app, /titleClassName="text-lg"/u);
   assert.match(app, /activeTaskActuallyRunning/u);
-  assert.match(app, /const projectStageElapsedSeconds = activeProjectId \? stageElapsedSeconds\[activeProjectId\] : null[\s\S]*const projectElapsedSeconds = activeProjectId && loadedStageTimingProjectIds\.current\.has\(activeProjectId\)[\s\S]*Object\.values\(projectStageElapsedSeconds \?\? \{\}\)\.reduce\(\(total, seconds\) => total \+ seconds, 0\)[\s\S]*: undefined/u);
+  assert.match(app, /const projectStageElapsedSeconds = activeProjectId \? stageElapsedSeconds\[activeProjectId\] : null[\s\S]*const projectElapsedSeconds = activeProjectId && loadedProjectIds\.current\.has\(activeProjectId\)[\s\S]*Object\.values\(projectStageElapsedSeconds \?\? \{\}\)\.reduce\(\(total, seconds\) => total \+ seconds, 0\)[\s\S]*: undefined/u);
   assert.doesNotMatch(app, /activeTaskStartedAtMs|activeTaskFinishedAtMs/u);
   assert.match(app, /stage\.id === activeTaskStageId[\s\S]*activeStageElapsedSeconds/u);
   assert.match(app, /stageElapsedSeconds[\s\S]*completedElapsedSeconds/u);
   assert.match(app, /controlAdapter\.getStageTimings/u);
-  assert.match(app, /stageTimingLoadPromises[\s\S]*await loadStageTimings\(activeProjectId\)/u);
+  assert.match(app, /loadPromises[\s\S]*getProjectStageTimings[\s\S]*loadStageTimings\(projectId\)/u);
   assert.match(app, /from "@\/services\/stage-timing-persistence\.mjs"/u);
   assert.match(app, /saveStageTimingsWithRetry\(controlAdapter, projectId, stages\)/u);
   assert.match(timingPersistence, /const SAVE_RETRY_DELAYS_MS = \[0, 250, 1000\][\s\S]*export async function saveStageTimingsWithRetry/u);
   assert.match(app, /activeStageTiming\.stageId\]: elapsedSeconds/u);
-  assert.match(app, /!loadedStageTimingProjectIds\.current\.has\(activeProjectId\)[\s\S]*!activeTaskActuallyRunning/u);
+  assert.match(app, /!loadedProjectIds\.current\.has\(activeProjectId\)[\s\S]*!activeTaskActuallyRunning/u);
   assert.match(app, /resumesAfterDesktopRestart/u);
   assert.match(app, /stage\.state === "complete" \? completedElapsedSeconds/u);
   assert.match(app, /\{isRunning \? "已运行" : "用时"\}/u);
@@ -186,6 +187,7 @@ test('workbench separates Agent chat and project dialogs from shared foundation 
   const projectDialogs = await read('src/ui/features/workbench/workbench-project-dialogs.tsx');
   const statusBar = await read('src/ui/features/workbench/workbench-status-bar.tsx');
   const taskActivity = await read('src/ui/features/workbench/workbench-task-activity.tsx');
+  const stageTimings = await read('src/ui/features/workbench/use-workbench-stage-timings.ts');
 
   assert.match(app, /from "@\/features\/workbench\/agent-chat-card"/u);
   assert.match(app, /<WorkbenchProjectPanel/u);
@@ -194,8 +196,9 @@ test('workbench separates Agent chat and project dialogs from shared foundation 
   assert.match(app, /<WorkbenchProjectDialogs/u);
   assert.match(app, /<WorkbenchStatusBar/u);
   assert.match(app, /<WorkbenchTaskActivity/u);
+  assert.match(app, /useWorkbenchStageTimings\(\{/u);
   assert.doesNotMatch(foundation, /function AgentChatCard|Agent 输入配置与发送/u);
-  assert.doesNotMatch(app, /<Dialog open=|<AlertDialog open=|<Progress|id="active-task-log"|Codex SDK 授权状态检测|title="项目任务"/u);
+  assert.doesNotMatch(app, /<Dialog open=|<AlertDialog open=|<Progress|id="active-task-log"|Codex SDK 授权状态检测|title="项目任务"|saveStageTimingsWithRetry|stageTimingSaveQueues/u);
   assert.match(agentChat, /export function AgentChatCard/u);
   assert.match(pipelineOverview, /export function WorkbenchPipelineOverview/u);
   assert.match(projectPanel, /export function WorkbenchProjectPanel/u);
@@ -203,6 +206,7 @@ test('workbench separates Agent chat and project dialogs from shared foundation 
   assert.match(projectDialogs, /export function WorkbenchProjectDialogs/u);
   assert.match(statusBar, /export function WorkbenchStatusBar[\s\S]*export function CodexStatusCard/u);
   assert.match(taskActivity, /export function WorkbenchTaskActivity/u);
+  assert.match(stageTimings, /export function useWorkbenchStageTimings[\s\S]*saveStageTimingsWithRetry/u);
 });
 
 test('pipeline summary follows title, screenplay, total progress, visual detail, then six stage cards', async () => {
