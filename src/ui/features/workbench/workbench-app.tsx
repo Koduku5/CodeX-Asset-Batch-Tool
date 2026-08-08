@@ -2,40 +2,26 @@ import * as React from "react"
 import {
   Activity,
   AlertTriangle,
-  Boxes,
-  Check,
   CheckCircle2,
   ChevronLeft,
-  ChevronRight,
   Database,
   FileOutput,
   FolderOpen,
   LoaderCircle,
-  Moon,
-  Network,
-  PanelRightOpen,
-  Pencil,
-  Plus,
   RefreshCw,
-  Sparkles,
-  Sun,
-  Trash2,
-  Upload,
-  WandSparkles,
   X,
 } from "lucide-react"
 
 import { useTheme } from "@/components/theme-provider"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { PendingAssetDialog } from "@/features/pending-assets/pending-asset-dialog"
 import { AgentChatCard } from "@/features/workbench/agent-chat-card"
 import { WorkbenchPipelineOverview } from "@/features/workbench/workbench-pipeline-overview"
+import { WorkbenchProjectPanel } from "@/features/workbench/workbench-project-panel"
+import { AssetOverview, PendingAssetBanner, PromptStudioLauncher } from "@/features/workbench/workbench-project-summary"
 import { WorkbenchProjectDialogs } from "@/features/workbench/workbench-project-dialogs"
+import { CodexStatusCard, WorkbenchStatusBar } from "@/features/workbench/workbench-status-bar"
 import { WorkbenchTaskActivity } from "@/features/workbench/workbench-task-activity"
 import { saveStageTimingsWithRetry } from "@/services/stage-timing-persistence.mjs"
 
@@ -47,7 +33,6 @@ import {
   controlAdapter,
   codexStatusAdapter,
   codexAgentChatAdapter,
-  ASSETS,
   PHASE_LABELS,
   CURRENT_STAGE_LABELS,
   TASK_STAGE_BY_ACTION,
@@ -55,12 +40,7 @@ import {
   safeMessage,
   taskFailureSummary,
   percent,
-  formatCount,
-  formatTime,
-  formatDuration,
   projectNameFromScreenplay,
-  StatusDot,
-  SectionHeading,
 } from "@/features/workbench/workbench-foundation"
 
 import { MemoPromptStudioDrawer } from "@/features/prompt-studio/prompt-studio-drawer"
@@ -965,61 +945,26 @@ export default function App() {
         )}
       >
         <div className="flex h-full min-h-0 flex-col bg-muted/25">
-          <header className="flex h-11 shrink-0 items-center gap-4 border-b bg-card px-4 text-[11px] text-muted-foreground">
-            <div className="flex shrink-0 items-center gap-2 font-semibold text-foreground"><Boxes className="size-4 text-primary" />KA Asset Batch</div>
-            <Separator orientation="vertical" className="h-5" />
-            <div className="flex min-w-0 flex-1 items-center gap-5 overflow-hidden">
-              <span className="flex shrink-0 items-center gap-2"><StatusDot state={summary.state} />{PHASE_LABELS[summary.phase] ?? "等待开始"}</span>
-              <span className="hidden shrink-0 sm:inline">项目用时 {formatDuration(projectElapsedSeconds)}</span>
-              <span className="hidden shrink-0 xl:inline">刷新 {formatTime(summary.observedAt)}</span>
-              <span className="hidden shrink-0 xl:inline">提示词库 正式注册表</span>
-            </div>
-            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-sm" onClick={() => setMotionMode((value) => value === "full" ? "reduced" : "full")} aria-label={motionMode === "full" ? "减少界面动效" : "开启动效"}><Sparkles className={cn(motionMode === "reduced" && "opacity-40")} /></Button></TooltipTrigger><TooltipContent>{motionMode === "full" ? "当前：标准动效" : "当前：减少动效"}</TooltipContent></Tooltip>
-            <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-sm" onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")} aria-label="切换主题">{resolvedTheme === "dark" ? <Sun /> : <Moon />}</Button></TooltipTrigger><TooltipContent>切换明暗主题</TooltipContent></Tooltip>
-          </header>
+          <WorkbenchStatusBar
+            summary={summary}
+            projectElapsedSeconds={projectElapsedSeconds}
+            motionMode={motionMode}
+            resolvedTheme={resolvedTheme}
+            toggleMotion={() => setMotionMode((value) => value === "full" ? "reduced" : "full")}
+            toggleTheme={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+          />
 
           <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-6xl space-y-4 p-4 sm:p-5">
               <header className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <Card className={cn(
-                    "z-10 w-[320px] max-w-full shrink-0 gap-0 py-0 shadow-panel transition-colors sm:absolute sm:top-1/2 sm:right-[calc(100%+1rem)] sm:-translate-y-1/2",
-                    !codexChecking && codexConnected && "border-success/70 bg-success/5",
-                    !codexChecking && !codexConnected && "border-destructive/55 bg-destructive/5",
-                  )}>
-                    <CardContent className="flex items-center gap-1.5 px-2.5 py-3">
-                      <div className="flex min-w-0 flex-1 items-center gap-1.5" aria-live="polite">
-                        <span className={cn(
-                          "grid size-7 shrink-0 place-items-center rounded-full border-2 bg-background",
-                          codexChecking ? "border-muted-foreground/35 text-muted-foreground" : codexConnected ? "border-success text-success" : "border-destructive text-destructive",
-                        )}>
-                          {codexChecking ? <LoaderCircle className="size-4 animate-spin" aria-label="正在检测" /> : codexConnected ? <Check className="size-4" aria-label="已连接" /> : <X className="size-4" aria-label="未连接" />}
-                        </span>
-                        <div className="min-w-0">
-                          <p className="truncate text-[11px] font-semibold">Codex SDK 授权状态检测</p>
-                          {!codexChecking && !codexConnected ? (
-                            <Button className="mt-0.5 h-5 gap-1 px-1.5 text-[10px]" size="sm" onClick={() => void authorizeCodex()} disabled={busyAction === "authorize-codex"}>
-                              {busyAction === "authorize-codex" ? <LoaderCircle className="size-3 animate-spin" /> : <Network className="size-3" />}
-                              授权 Codex SDK
-                            </Button>
-                          ) : (
-                            <p className={cn("mt-0.5 truncate text-[10px]", codexConnected ? "text-success" : "text-muted-foreground")}>
-                              {codexChecking ? "正在检查 Codex SDK 与登录状态…" : codexStatus?.message ?? "Codex SDK 状态暂不可用"}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 items-center">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button className="size-7" variant="ghost" size="icon-sm" onClick={() => void checkCodexStatus()} disabled={codexChecking} aria-label={codexConnected ? "重新检测 Codex SDK" : "检测 Codex SDK 连接"}>
-                              <RefreshCw className={cn(codexChecking && "animate-spin")} />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{codexConnected ? "重新检测" : "检测连接"}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <CodexStatusCard
+                    checking={codexChecking}
+                    connected={codexConnected}
+                    message={codexStatus?.message}
+                    authorizing={busyAction === "authorize-codex"}
+                    authorize={() => void authorizeCodex()}
+                    check={() => void checkCodexStatus()}
+                  />
                   <AgentChatCard
                     projectId={activeProjectId}
                     connected={codexConnected}
@@ -1050,52 +995,30 @@ export default function App() {
                 </div>
               </header>
 
-              <Card className="gap-3 py-4 shadow-panel">
-                <CardHeader className="px-4">
-                  <SectionHeading
-                    title="项目任务"
-                    titleClassName="text-lg"
-                    action={(
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <Button size="sm" variant="outline" onClick={() => setNewProjectOpen(true)}><Plus />新建项目</Button>
-                        <Button size="sm" variant="outline" onClick={() => { if (activeProject) { setRenameProjectName(activeProject.displayName); setRenameProjectOpen(true) } }} disabled={!activeProjectIsIsolated}><Pencil />重命名当前项目</Button>
-                        <Button size="sm" variant="destructive" onClick={() => setDeleteProjectOpen(true)} disabled={!activeProjectIsIsolated || activeProjectHasRunningTask || activeAgentChat?.status === "running"}><Trash2 />删除当前项目</Button>
-                      </div>
-                    )}
-                  />
-                </CardHeader>
-                <CardContent className="space-y-3 px-4">
-                  <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_17rem]">
-                    <div className="min-w-0">
-                      <div className="flex gap-3 overflow-x-auto pb-1" role="listbox" aria-label="项目任务">
-                        {projectsLoading && !projects.length && Array.from({ length: 3 }).map((_, index) => <div key={index} className="h-24 min-w-56 animate-pulse-soft rounded-xl bg-muted" />)}
-                        {projects.map((project, index) => {
-                          const selected = project.projectId === activeProjectId
-                          const projectTask = tasks[project.projectId]
-                          const state = ACTIVE_TASK_STATUSES.has(String(projectTask?.status))
-                            ? "active"
-                            : projectTask?.status === "paused" ? "warning" : project.statusSummary?.state
-                          return (
-                            <button key={project.projectId} ref={(node) => { if (node) projectButtonRefs.current.set(project.projectId, node); else projectButtonRefs.current.delete(project.projectId) }} type="button" role="option" aria-selected={selected} onClick={() => void selectProject(project.projectId)} onKeyDown={(event) => focusProjectFromKey(event, index)} className={cn("min-h-24 min-w-56 flex-1 rounded-xl border bg-muted/20 p-3 text-left transition-all hover:border-primary/35 hover:bg-primary/5", selected && "border-primary/45 bg-primary/8 shadow-sm")}>
-                              <div className="flex items-center gap-2"><StatusDot state={state} /><span className="min-w-0 flex-1 truncate text-sm font-semibold">{project.displayName}</span>{selected && <Badge variant="info">当前</Badge>}</div>
-                              <p className="mt-3 truncate text-xs text-muted-foreground">{PHASE_LABELS[project.statusSummary?.phase] ?? "等待剧本"}</p>
-                              <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground"><span>{project.storageMode === "isolated-project" ? "独立项目" : "兼容项目"}</span><span>{formatCount(project.statusSummary?.assetTotal)} 项资产</span></div>
-                            </button>
-                          )
-                        })}
-                        {!projectsLoading && !projects.length && <div className="grid min-h-24 min-w-56 place-items-center rounded-xl border border-dashed px-4 text-center text-xs text-muted-foreground">拖入右侧剧本即可自动新建项目</div>}
-                      </div>
-                    </div>
-                    <div>
-                      <input ref={fileInputRef} className="sr-only" type="file" accept=".txt,.docx" aria-label="导入剧本文件" onChange={(event) => event.target.files?.[0] && void createProjectFromScreenplay(event.target.files[0])} />
-                      <button type="button" disabled={busyAction === "screenplay-project"} onClick={() => fileInputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) void createProjectFromScreenplay(file) }} className="flex min-h-24 w-full items-center gap-3 rounded-xl border border-dashed bg-muted/15 px-4 text-left transition-colors hover:border-primary/45 hover:bg-primary/5 disabled:opacity-50">
-                        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-background shadow-sm ring-1 ring-border">{busyAction === "screenplay-project" ? <LoaderCircle className="size-4 animate-spin text-primary" /> : <Upload className="size-4 text-primary" />}</span>
-                        <span className="min-w-0"><span className="block text-sm font-medium">拖入 TXT / DOCX 剧本</span><span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground">自动以剧本名新建独立项目</span></span>
-                      </button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+              <WorkbenchProjectPanel
+                studio={{
+                  activeAgentChatRunning: activeAgentChat?.status === "running",
+                  activeProject,
+                  activeProjectHasRunningTask,
+                  activeProjectId,
+                  activeProjectIsIsolated,
+                  busyAction,
+                  createFromScreenplay: (file) => void createProjectFromScreenplay(file),
+                  fileInputRef,
+                  focusFromKey: focusProjectFromKey,
+                  openCreate: () => setNewProjectOpen(true),
+                  openDelete: () => setDeleteProjectOpen(true),
+                  openRename: (name) => {
+                    setRenameProjectName(name)
+                    setRenameProjectOpen(true)
+                  },
+                  projectButtonRefs,
+                  projects,
+                  projectsLoading,
+                  selectProject: (projectId) => void selectProject(projectId),
+                  tasks,
+                }}
+              />
 
               <WorkbenchPipelineOverview
                 studio={{
@@ -1122,46 +1045,23 @@ export default function App() {
                 }}
               />
 
-              {pendingAssetCount > 0 && (
-                <button type="button" onClick={() => setPendingAssetDialogOpen(true)} disabled={!activeProject} className="group flex w-full flex-col gap-4 rounded-xl border border-warning/55 bg-warning/8 p-4 text-left transition-[border-color,background-color,box-shadow] hover:border-warning hover:bg-warning/12 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50 sm:flex-row sm:items-center sm:justify-between" aria-label={`打开 ${pendingAssetCount} 项待确认资产`}>
-                  <div className="flex min-w-0 gap-3">
-                    <AlertTriangle className="mt-0.5 size-5 shrink-0 text-warning" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold">有 {pendingAssetCount} 项资产需要人工确认</p>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                        其他集数和世界观总览可以继续完成；确认结束后才会统一整理资产 ID、生成资产设定和 Excel。
-                      </p>
-                    </div>
-                  </div>
-                  <ChevronRight className="size-5 shrink-0 text-warning transition-transform group-hover:translate-x-1" aria-hidden="true" />
-                </button>
-              )}
+              <PendingAssetBanner
+                count={pendingAssetCount}
+                projectAvailable={Boolean(activeProject)}
+                open={() => setPendingAssetDialogOpen(true)}
+              />
 
-              <section>
-                <SectionHeading title="资产拆分概览" description="当前项目 Cache 中的真实数量" />
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                  {ASSETS.map((asset) => <Card key={asset.id} className="min-h-20"><CardContent className="flex h-full items-center gap-3 p-3"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Boxes className="size-4" /></span><div><p className="text-xl font-semibold tabular-nums">{formatCount(snapshot?.assetCounts?.byType?.[asset.countKey])}</p><p className="text-[11px] text-muted-foreground">{asset.label}</p></div></CardContent></Card>)}
-                </div>
-              </section>
+              <AssetOverview counts={snapshot?.assetCounts?.byType} />
 
-              <button
-                ref={batchStudioButtonRef}
-                type="button"
-                onClick={() => void setStudioOpen(!drawerOpen, activeProject ? "batch" : "templates")}
-                disabled={Boolean(activeProject && pendingAssetCount > 0)}
-                aria-expanded={drawerOpen}
-                aria-controls="prompt-studio-drawer"
-                aria-label={drawerOpen ? "关闭 Prompt Studio" : "打开 Prompt Studio"}
-                className="group w-full overflow-hidden rounded-2xl border border-primary/35 bg-gradient-to-br from-primary/14 via-card to-card p-5 text-left shadow-panel transition-all hover:border-primary/60 hover:shadow-overlay disabled:opacity-50"
-              >
-                <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-4"><span className="grid size-12 place-items-center rounded-xl bg-primary text-primary-foreground shadow-sm"><WandSparkles className="size-6" /></span><div><p className="text-[10px] font-semibold tracking-[0.18em] text-primary">BATCH GENERATION</p><h2 className="mt-1 text-xl font-semibold">{drawerOpen ? "批量出图 · 关闭 Prompt Studio" : "批量出图 · 打开 Prompt Studio"}</h2><p className="mt-1 text-xs text-muted-foreground">配置风格、类别、参考图、提示词路由与出图后端</p></div></div>
-                  {drawerOpen ? <X className="size-6 text-primary transition-transform group-hover:rotate-90" /> : <PanelRightOpen className="size-6 text-primary transition-transform group-hover:translate-x-1" />}
-                </div>
-                <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                  {[["当前批次", snapshot?.batch?.scope === "none" ? "等待配置" : "资产出图"], ["后端", snapshot?.batch?.backend || "尚未运行"], ["成功", formatCount(batchCounts.completed)], ["失败", formatCount(batchCounts.failed)], ["当前项", snapshot?.batch?.activeTask?.label || `${formatCount(batchCounts.pending)} 项待处理`]].map(([label, value]) => <div key={String(label)} className="rounded-lg border border-border/70 bg-background/55 px-3 py-2"><p className="text-[10px] text-muted-foreground">{label}</p><p className="mt-1 truncate text-xs font-medium">{value}</p></div>)}
-                </div>
-              </button>
+              <PromptStudioLauncher
+                buttonRef={batchStudioButtonRef}
+                drawerOpen={drawerOpen}
+                activeProject={Boolean(activeProject)}
+                pendingAssetCount={pendingAssetCount}
+                snapshot={snapshot}
+                batchCounts={batchCounts}
+                toggle={() => void setStudioOpen(!drawerOpen, activeProject ? "batch" : "templates")}
+              />
 
               <WorkbenchTaskActivity
                 studio={{

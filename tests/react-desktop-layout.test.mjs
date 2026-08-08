@@ -24,10 +24,13 @@ const readUiSource = async () => (await readUiFiles()).map(({ source }) => sourc
 const readWorkbenchSource = async () => (await Promise.all([
   read('src/ui/features/workbench/workbench-foundation.tsx'),
   read('src/ui/features/workbench/workbench-app.tsx'),
-  read('src/ui/features/workbench/agent-chat-card.tsx'),
+  read('src/ui/features/workbench/workbench-status-bar.tsx'),
+  read('src/ui/features/workbench/workbench-project-panel.tsx'),
   read('src/ui/features/workbench/workbench-pipeline-overview.tsx'),
-  read('src/ui/features/workbench/workbench-project-dialogs.tsx'),
-  read('src/ui/features/workbench/workbench-task-activity.tsx')
+  read('src/ui/features/workbench/workbench-project-summary.tsx'),
+  read('src/ui/features/workbench/workbench-task-activity.tsx'),
+  read('src/ui/features/workbench/agent-chat-card.tsx'),
+  read('src/ui/features/workbench/workbench-project-dialogs.tsx')
 ])).join('\n');
 
 const readWorkbenchAndStudioSource = async () => (await Promise.all([
@@ -49,6 +52,7 @@ const readComponentSource = async (name) => {
 
 test('React desktop shell preserves the production-first single-column layout', async () => {
   const app = await readWorkbenchSource();
+  const appShell = await read('src/ui/features/workbench/workbench-app.tsx');
   const timingPersistence = await read('src/ui/services/stage-timing-persistence.mjs');
 
   for (const text of [
@@ -66,8 +70,8 @@ test('React desktop shell preserves the production-first single-column layout', 
   assert.doesNotMatch(app, />流水线操作</u);
   assert.match(app, /runTask\(startTaskAction\)/u);
   assert.ok(app.indexOf('项目任务') < app.indexOf('拖入 TXT / DOCX 剧本'));
-  assert.ok(app.indexOf('拖入 TXT / DOCX 剧本') < app.indexOf('<WorkbenchPipelineOverview'));
-  assert.ok(app.indexOf('<WorkbenchPipelineOverview') < app.indexOf('资产拆分概览'));
+  assert.ok(appShell.indexOf('<WorkbenchProjectPanel') < appShell.indexOf('<WorkbenchPipelineOverview'));
+  assert.ok(appShell.indexOf('<WorkbenchPipelineOverview') < appShell.indexOf('<AssetOverview'));
   assert.match(app, /createProjectFromScreenplay/u);
   assert.match(app, /controlAdapter\.createProject/u);
   assert.match(app, /controlAdapter\.uploadScreenplay\(\{ projectId: created\.projectId/u);
@@ -75,7 +79,8 @@ test('React desktop shell preserves the production-first single-column layout', 
   assert.match(app, /删除当前项目/u);
   assert.match(app, /永久删除该项目的独立目录/u);
   assert.match(app, /Codex SDK 授权状态检测/u);
-  assert.ok(app.indexOf('Codex SDK 授权状态检测') < app.indexOf('{activeProject?.displayName ?? "选择一个项目"}'));
+  assert.ok(appShell.indexOf('<CodexStatusCard') < appShell.indexOf('<AgentChatCard'));
+  assert.ok(appShell.indexOf('<AgentChatCard') < appShell.indexOf('{activeProject?.displayName ?? "选择一个项目"}'));
   assert.match(app, /sm:right-\[calc\(100%\+1rem\)\]/u);
   assert.match(app, /sm:absolute sm:top-1\/2/u);
   assert.match(app, /w-\[320px\]/u);
@@ -128,15 +133,15 @@ test('React desktop shell preserves the production-first single-column layout', 
   assert.match(app, /taskLogOpen/u);
   assert.match(app, /aria-label="关闭错误提示"/u);
   assert.match(app, /dismissedFailureTaskIds/u);
-  assert.match(app, /有 \{pendingAssetCount\} 项资产需要人工确认/u);
+  assert.match(appShell, /count=\{pendingAssetCount\}/u);
   assert.match(app, /<PendingAssetDialog/u);
   assert.match(app, /runTask\(startTaskAction\)/u);
   assert.doesNotMatch(app, /onFinalized=.*runTask/u);
   assert.match(app, /role=\{toast\.tone === "error" \? "alert" : "status"\}/u);
   assert.doesNotMatch(app, /summary\.currentTaskLabel/u);
-  const authorizationCard = app.indexOf('Codex SDK 授权状态检测');
-  const chatPlacement = app.indexOf('<AgentChatCard', authorizationCard);
-  const projectTitle = app.indexOf('{activeProject?.displayName ?? "选择一个项目"}', chatPlacement);
+  const authorizationCard = appShell.indexOf('<CodexStatusCard');
+  const chatPlacement = appShell.indexOf('<AgentChatCard', authorizationCard);
+  const projectTitle = appShell.indexOf('{activeProject?.displayName ?? "选择一个项目"}', chatPlacement);
   assert.ok(authorizationCard >= 0 && authorizationCard < chatPlacement && chatPlacement < projectTitle);
   const chatSource = await readComponentSource('AgentChatCard');
   assert.match(chatSource, /Agent 对话/u);
@@ -176,18 +181,27 @@ test('workbench separates Agent chat and project dialogs from shared foundation 
   const foundation = await read('src/ui/features/workbench/workbench-foundation.tsx');
   const agentChat = await read('src/ui/features/workbench/agent-chat-card.tsx');
   const pipelineOverview = await read('src/ui/features/workbench/workbench-pipeline-overview.tsx');
+  const projectPanel = await read('src/ui/features/workbench/workbench-project-panel.tsx');
+  const projectSummary = await read('src/ui/features/workbench/workbench-project-summary.tsx');
   const projectDialogs = await read('src/ui/features/workbench/workbench-project-dialogs.tsx');
+  const statusBar = await read('src/ui/features/workbench/workbench-status-bar.tsx');
   const taskActivity = await read('src/ui/features/workbench/workbench-task-activity.tsx');
 
   assert.match(app, /from "@\/features\/workbench\/agent-chat-card"/u);
+  assert.match(app, /<WorkbenchProjectPanel/u);
+  assert.match(app, /<PromptStudioLauncher/u);
   assert.match(app, /<WorkbenchPipelineOverview/u);
   assert.match(app, /<WorkbenchProjectDialogs/u);
+  assert.match(app, /<WorkbenchStatusBar/u);
   assert.match(app, /<WorkbenchTaskActivity/u);
   assert.doesNotMatch(foundation, /function AgentChatCard|Agent 输入配置与发送/u);
-  assert.doesNotMatch(app, /<Dialog open=|<AlertDialog open=|<Progress|id="active-task-log"/u);
+  assert.doesNotMatch(app, /<Dialog open=|<AlertDialog open=|<Progress|id="active-task-log"|Codex SDK 授权状态检测|title="项目任务"/u);
   assert.match(agentChat, /export function AgentChatCard/u);
   assert.match(pipelineOverview, /export function WorkbenchPipelineOverview/u);
+  assert.match(projectPanel, /export function WorkbenchProjectPanel/u);
+  assert.match(projectSummary, /export function PromptStudioLauncher/u);
   assert.match(projectDialogs, /export function WorkbenchProjectDialogs/u);
+  assert.match(statusBar, /export function WorkbenchStatusBar[\s\S]*export function CodexStatusCard/u);
   assert.match(taskActivity, /export function WorkbenchTaskActivity/u);
 });
 
