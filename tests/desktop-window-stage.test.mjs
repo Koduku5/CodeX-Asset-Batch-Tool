@@ -8,7 +8,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (filename) => readFile(path.join(root, filename), 'utf8');
 
 test('WPF keeps Prompt Studio in one bounded two-dimensional stage', async () => {
-  const source = await read('desktop/PromptStudio.Desktop/MainWindow.cs');
+  const source = await read('desktop/PromptStudio.Desktop/MainWindow.Stage.cs');
 
   assert.match(source, /CalculateStageBounds\(/u);
   assert.match(source, /MonitorFromWindow/u);
@@ -22,7 +22,7 @@ test('WPF keeps Prompt Studio in one bounded two-dimensional stage', async () =>
 });
 
 test('WPF stage RPC returns DIP geometry and restores native placement idempotently', async () => {
-  const source = await read('desktop/PromptStudio.Desktop/MainWindow.cs');
+  const source = await read('desktop/PromptStudio.Desktop/MainWindow.Stage.cs');
 
   for (const field of [
     'originalWidth',
