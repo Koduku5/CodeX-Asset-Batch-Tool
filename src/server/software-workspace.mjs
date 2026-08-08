@@ -8,7 +8,7 @@ import {
   rm,
   writeFile
 } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 
 import {
   MAX_SCREENPLAY_BYTES,
@@ -48,6 +48,10 @@ import {
   storeScreenplay
 } from './software-workspace/screenplay-import.mjs';
 import { resolveSoftwareWorkspaceConfig } from './software-workspace/config.mjs';
+import {
+  materializeProjectRuntime,
+  replaceDirectory
+} from './software-workspace/runtime-materialization.mjs';
 
 export {
   MAX_SCREENPLAY_BYTES,
@@ -157,7 +161,7 @@ export class SoftwareWorkspace {
       if (sameTreeManifest(sharedAssetsManifest, legacyManifest)) safeSourceManifest = legacyManifest;
     }
     if (safeSourceManifest) {
-      const upgraded = await this.#replaceDirectory(engineAssetsRoot, this.sharedAssetsRoot, 'sharedAssetsRoot', {
+      const upgraded = await replaceDirectory(this, engineAssetsRoot, this.sharedAssetsRoot, 'sharedAssetsRoot', {
         expectedTargetManifest: safeSourceManifest,
         sourceManifest: engineAssetsManifest
       });
@@ -341,172 +345,11 @@ export class SoftwareWorkspace {
     });
   }
 
-  async #replaceDirectory(sourceRoot, targetRoot, label, {
-    expectedTargetManifest = null,
-    sourceManifest = null
-  } = {}) {
-    assertPathInside(this.softwareRoot, targetRoot, label);
-    await assertSafeTargetChain(this.softwareRoot, dirname(targetRoot), `${label} 的父目录`);
-    const stageRoot = `${targetRoot}.stage-${randomUUID()}`;
-    const backupRoot = `${targetRoot}.backup-${randomUUID()}`;
-    let hasBackup = false;
-    try {
-      await copySafeTree(sourceRoot, stageRoot, label, {
-        files: 0,
-        bytes: 0,
-        maxFiles: this.maxRuntimeFiles,
-        maxBytes: this.maxRuntimeBytes
-      });
-      if (sourceManifest) {
-        const stagedSourceManifest = await buildTreeManifest(stageRoot, `${label} 临时目录`, {
-          files: 0,
-          bytes: 0,
-          maxFiles: this.maxRuntimeFiles,
-          maxBytes: this.maxRuntimeBytes
-        });
-        if (!sameTreeManifest(stagedSourceManifest, sourceManifest)) {
-          fail('SOURCE_CHANGED_DURING_COPY', `${label} 的来源在复制期间发生变化`);
-        }
-      }
-      const current = await lstatOrNull(targetRoot);
-      if (current === null && expectedTargetManifest) return false;
-      if (current !== null) {
-        await assertSafeTargetChain(this.softwareRoot, targetRoot, label);
-        if (!current.isDirectory()) fail('INVALID_RUNTIME_DIRECTORY', `${label} 不是普通目录`);
-        await rename(targetRoot, backupRoot);
-        hasBackup = true;
-        if (expectedTargetManifest) {
-          const actualTargetManifest = await buildTreeManifest(backupRoot, `${label} 待替换目录`, {
-            files: 0,
-            bytes: 0,
-            maxFiles: this.maxRuntimeFiles,
-            maxBytes: this.maxRuntimeBytes
-          });
-          if (!sameTreeManifest(actualTargetManifest, expectedTargetManifest)) {
-            await rename(backupRoot, targetRoot);
-            hasBackup = false;
-            return false;
-          }
-        }
-      }
-      try {
-        await rename(stageRoot, targetRoot);
-      } catch (error) {
-        if (hasBackup) {
-          await rename(backupRoot, targetRoot);
-          hasBackup = false;
-        }
-        throw error;
-      }
-      if (hasBackup) {
-        await rm(backupRoot, { recursive: true, force: true });
-        hasBackup = false;
-      }
-      return true;
-    } finally {
-      if (await lstatOrNull(stageRoot)) await rm(stageRoot, { recursive: true, force: true });
-      if (hasBackup && await lstatOrNull(backupRoot) && !(await lstatOrNull(targetRoot))) {
-        await rename(backupRoot, targetRoot);
-        hasBackup = false;
-      }
-      if (await lstatOrNull(backupRoot)) await rm(backupRoot, { recursive: true, force: true });
-    }
-  }
-
-  async #replaceFile(sourcePath, targetPath, label) {
-    assertPathInside(this.softwareRoot, targetPath, label);
-    await assertSafeTargetChain(this.softwareRoot, dirname(targetPath), `${label} 的父目录`);
-    const stagePath = `${targetPath}.stage-${randomUUID()}`;
-    const backupPath = `${targetPath}.backup-${randomUUID()}`;
-    let hasBackup = false;
-    try {
-      await copySafeTree(sourcePath, stagePath, label, {
-        files: 0,
-        bytes: 0,
-        maxFiles: this.maxRuntimeFiles,
-        maxBytes: this.maxRuntimeBytes
-      });
-      const current = await lstatOrNull(targetPath);
-      if (current !== null) {
-        await assertSafeTargetChain(this.softwareRoot, targetPath, label);
-        if (!current.isFile()) fail('INVALID_RUNTIME_FILE', `${label} 不是普通文件`);
-        await rename(targetPath, backupPath);
-        hasBackup = true;
-      }
-      try {
-        await rename(stagePath, targetPath);
-      } catch (error) {
-        if (hasBackup) {
-          await rename(backupPath, targetPath);
-          hasBackup = false;
-        }
-        throw error;
-      }
-      if (hasBackup) {
-        await rm(backupPath, { force: true });
-        hasBackup = false;
-      }
-    } finally {
-      if (await lstatOrNull(stagePath)) await rm(stagePath, { force: true });
-      if (hasBackup && await lstatOrNull(backupPath) && !(await lstatOrNull(targetPath))) {
-        await rename(backupPath, targetPath);
-        hasBackup = false;
-      }
-      if (await lstatOrNull(backupPath)) await rm(backupPath, { force: true });
-    }
-  }
-
   async materializeProjectRuntime(projectId) {
     validateProjectId(projectId);
     await this.initialize();
     const project = await this.getProject(projectId);
-    const engineScriptsRoot = join(this.engineRoot, 'scripts');
-    const scriptsSourceManifest = await buildTreeManifest(engineScriptsRoot, 'engineRoot/scripts', {
-      files: 0,
-      bytes: 0,
-      maxFiles: this.maxRuntimeFiles,
-      maxBytes: this.maxRuntimeBytes
-    });
-    const assetsSourceManifest = await buildTreeManifest(this.sharedAssetsRoot, 'sharedAssetsRoot', {
-      files: 0,
-      bytes: 0,
-      maxFiles: this.maxRuntimeFiles,
-      maxBytes: this.maxRuntimeBytes
-    });
-    const scriptsRoot = join(project.projectRoot, 'scripts');
-    const assetsRoot = join(project.projectRoot, 'assets');
-    const targetManifest = async (targetRoot, label) => {
-      const info = await lstatOrNull(targetRoot);
-      if (info === null) return null;
-      await assertSafeTargetChain(this.softwareRoot, targetRoot, label);
-      if (!info.isDirectory()) fail('INVALID_RUNTIME_DIRECTORY', `${label} 不是普通目录`);
-      return buildTreeManifest(targetRoot, label, {
-        files: 0,
-        bytes: 0,
-        maxFiles: this.maxRuntimeFiles,
-        maxBytes: this.maxRuntimeBytes
-      });
-    };
-    const scriptsTargetManifest = await targetManifest(scriptsRoot, `项目 ${projectId}/scripts`);
-    if (!sameTreeManifest(scriptsSourceManifest, scriptsTargetManifest)) {
-      await this.#replaceDirectory(engineScriptsRoot, scriptsRoot, `项目 ${projectId}/scripts`, {
-        expectedTargetManifest: scriptsTargetManifest,
-        sourceManifest: scriptsSourceManifest
-      });
-    }
-    const assetsTargetManifest = await targetManifest(assetsRoot, `项目 ${projectId}/assets`);
-    if (!sameTreeManifest(assetsSourceManifest, assetsTargetManifest)) {
-      await this.#replaceDirectory(this.sharedAssetsRoot, assetsRoot, `项目 ${projectId}/assets`, {
-        expectedTargetManifest: assetsTargetManifest,
-        sourceManifest: assetsSourceManifest
-      });
-    }
-    return Object.freeze({
-      projectId,
-      projectRoot: project.projectRoot,
-      scriptsRoot,
-      assetsRoot
-    });
+    return materializeProjectRuntime(this, project);
   }
 
   async importScreenplay(projectId, { filename, buffer, stream, overwrite = false } = {}) {
