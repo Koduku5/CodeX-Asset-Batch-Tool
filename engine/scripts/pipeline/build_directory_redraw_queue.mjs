@@ -5,16 +5,31 @@ import {
   acquirePipelineLock,
   canonicalSha256,
   cleanText,
-  hasExactKeys,
   isObject,
-  normalizePromptText,
-  parseJsonText,
   readJsonFile,
   releasePipelineLock,
   sha256,
-  validatePngBytes,
   writeJsonAtomic,
 } from "../lib/pipeline_runtime.mjs";
+import { imageSignatureMatches } from "../lib/directory-redraw/image-signatures.mjs";
+import {
+  comparePortablePaths,
+  comparisonPathKey,
+  decodeConfiguration,
+  isWithinOrSame,
+  normalizeCase,
+  requireRealDirectory,
+  resolveInside,
+  toPortableRelativePath,
+} from "../lib/directory-redraw/contracts.mjs";
+import {
+  assertOutputTargetsAvailable,
+  isBlankInitializedProgress,
+  isBlankInitializedQueue,
+  queueHasIncompleteItems,
+  validateItemUniqueness,
+  validatePreviousState,
+} from "../lib/directory-redraw/queue-state.mjs";
 
 const args = process.argv.slice(2);
 if (args.length !== 1) {
@@ -29,278 +44,11 @@ const progressPath = path.join(redrawCacheDir, "进度.json");
 const lockPath = path.join(cacheDir, ".pipeline.lock");
 const supportedExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const maxReferenceBytes = 20 * 1024 * 1024;
-const maxImagePixels = 24 * 1024 * 1024;
 const maxScannedEntries = 100_000;
 const maxSourceImages = 10_000;
 const maxTotalSourceBytes = 50n * 1024n * 1024n * 1024n;
 
-const normalizeCase = (value) =>
-  process.platform === "win32" ? value.toLowerCase() : value;
 
-// Preserve the filesystem's exact Unicode code points for later I/O. NFC is
-// only appropriate for comparison keys; persisting it can make an NFD-named
-// file impossible to reopen on filesystems that distinguish the two forms.
-const toPortableRelativePath = (value) => String(value ?? "").split(path.sep).join("/");
-const comparisonPathKey = (value) => toPortableRelativePath(value).normalize("NFC").toLowerCase();
-const comparePortablePaths = (left, right) => {
-  const leftRaw = toPortableRelativePath(left);
-  const rightRaw = toPortableRelativePath(right);
-  const folded = comparisonPathKey(leftRaw).localeCompare(comparisonPathKey(rightRaw), "en");
-  if (folded) return folded;
-  return leftRaw < rightRaw ? -1 : leftRaw > rightRaw ? 1 : 0;
-};
-
-const isRootPath = (value) =>
-  normalizeCase(path.resolve(value)) === normalizeCase(path.parse(path.resolve(value)).root);
-
-const isWithinOrSame = (target, root) => {
-  const relative = path.relative(root, target);
-  return (
-    relative === "" ||
-    (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
-  );
-};
-
-const dimensionsAreSafe = (width, height) =>
-  Number.isInteger(width) &&
-  Number.isInteger(height) &&
-  width > 0 &&
-  height > 0 &&
-  width <= Math.floor(maxImagePixels / height);
-
-const resolveInside = (root, relativePath, label) => {
-  if (!cleanText(relativePath) || path.isAbsolute(relativePath)) {
-    throw new Error(`${label}不是有效相对路径：${relativePath}`);
-  }
-  const segments = String(relativePath).split("/");
-  if (
-    segments.some(
-      (segment) =>
-        !segment ||
-        segment === "." ||
-        segment === ".." ||
-        segment.includes(":") ||
-        segment.includes("\\"),
-    )
-  ) {
-    throw new Error(`${label}含有非法路径片段：${relativePath}`);
-  }
-  const target = path.resolve(root, ...segments);
-  if (!isWithinOrSame(target, root) || normalizeCase(target) === normalizeCase(root)) {
-    throw new Error(`${label}越出所选目录：${relativePath}`);
-  }
-  return target;
-};
-
-const decodeConfiguration = () => {
-  const encoded = cleanText(process.env.KA_REDRAW_CONFIG_B64);
-  if (!encoded) throw new Error("缺少 KA_REDRAW_CONFIG_B64 批量重绘配置");
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 !== 0) {
-    throw new Error("KA_REDRAW_CONFIG_B64 不是有效 Base64");
-  }
-  let decoded;
-  try {
-    decoded = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(encoded, "base64"));
-  } catch (error) {
-    throw new Error(`批量重绘配置不是有效 UTF-8：${error.message}`);
-  }
-  const config = parseJsonText(decoded, "批量重绘配置");
-  if (
-    !hasExactKeys(config, ["outputRoot", "prompt", "sourceRoot"]) ||
-    typeof config.sourceRoot !== "string" ||
-    typeof config.outputRoot !== "string" ||
-    typeof config.prompt !== "string"
-  ) {
-    throw new Error("批量重绘配置必须且只能包含 sourceRoot、outputRoot、prompt 三个字符串");
-  }
-  const prompt = normalizePromptText(config.prompt);
-  if (!prompt) throw new Error("本批次统一重绘要求不能为空");
-  return {
-    sourceRoot: cleanText(config.sourceRoot),
-    outputRoot: cleanText(config.outputRoot),
-    prompt,
-  };
-};
-
-const requireRealDirectory = async (input, label) => {
-  if (!input || !path.isAbsolute(input)) throw new Error(`${label}必须是绝对路径`);
-  const resolved = path.resolve(input);
-  if (isRootPath(resolved)) throw new Error(`${label}不能是盘符根目录或 UNC 共享根目录`);
-  let linkStat;
-  try {
-    linkStat = await fs.lstat(resolved);
-  } catch (error) {
-    if (error?.code === "ENOENT") throw new Error(`${label}不存在：${resolved}`);
-    throw new Error(`${label}无法读取：${resolved}（${error?.code ?? error.message}）`);
-  }
-  if (linkStat.isSymbolicLink()) throw new Error(`${label}不能是符号链接或目录联接：${resolved}`);
-  if (!linkStat.isDirectory()) throw new Error(`${label}不是文件夹：${resolved}`);
-  const real = await fs.realpath(resolved);
-  if (isRootPath(real)) throw new Error(`${label}不能解析到盘符根目录或 UNC 共享根目录`);
-  return real;
-};
-
-const validJpegBytes = (bytes) => {
-  if (
-    bytes.length < 16 ||
-    bytes[0] !== 0xff ||
-    bytes[1] !== 0xd8 ||
-    bytes.at(-2) !== 0xff ||
-    bytes.at(-1) !== 0xd9
-  ) {
-    return false;
-  }
-  const sofMarkers = new Set([
-    0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
-  ]);
-  let offset = 2;
-  let sawFrame = false;
-  while (offset < bytes.length - 2) {
-    if (bytes[offset] !== 0xff) return false;
-    while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
-    if (offset >= bytes.length) return false;
-    const marker = bytes[offset];
-    offset += 1;
-    if (marker === 0xd9) return false;
-    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
-    if (offset + 2 > bytes.length) return false;
-    const segmentLength = bytes.readUInt16BE(offset);
-    const segmentEnd = offset + segmentLength;
-    if (segmentLength < 2 || segmentEnd > bytes.length) return false;
-    if (sofMarkers.has(marker)) {
-      if (segmentLength < 8) return false;
-      const height = bytes.readUInt16BE(offset + 3);
-      const width = bytes.readUInt16BE(offset + 5);
-      if (!dimensionsAreSafe(width, height)) return false;
-      sawFrame = true;
-    }
-    if (marker === 0xda) return sawFrame && segmentEnd < bytes.length - 2;
-    offset = segmentEnd;
-  }
-  return false;
-};
-
-const consumeGifSubBlocks = (bytes, start) => {
-  let offset = start;
-  let sawData = false;
-  while (offset < bytes.length) {
-    const length = bytes[offset];
-    offset += 1;
-    if (length === 0) return { offset, sawData, complete: true };
-    if (offset + length > bytes.length) return { offset, sawData, complete: false };
-    sawData = true;
-    offset += length;
-  }
-  return { offset, sawData, complete: false };
-};
-
-const validGifBytes = (bytes) => {
-  if (bytes.length < 14 || !["GIF87a", "GIF89a"].includes(bytes.toString("ascii", 0, 6))) {
-    return false;
-  }
-  if (!dimensionsAreSafe(bytes.readUInt16LE(6), bytes.readUInt16LE(8))) return false;
-  const packed = bytes[10];
-  let offset = 13 + (packed & 0x80 ? 3 * 2 ** ((packed & 0x07) + 1) : 0);
-  if (offset > bytes.length) return false;
-  let sawImage = false;
-  while (offset < bytes.length) {
-    const marker = bytes[offset];
-    offset += 1;
-    if (marker === 0x3b) return sawImage && offset === bytes.length;
-    if (marker === 0x21) {
-      if (offset >= bytes.length) return false;
-      offset += 1;
-      const blocks = consumeGifSubBlocks(bytes, offset);
-      if (!blocks.complete) return false;
-      offset = blocks.offset;
-      continue;
-    }
-    if (marker !== 0x2c || offset + 9 > bytes.length) return false;
-    const width = bytes.readUInt16LE(offset + 4);
-    const height = bytes.readUInt16LE(offset + 6);
-    const imagePacked = bytes[offset + 8];
-    offset += 9;
-    if (!dimensionsAreSafe(width, height)) return false;
-    if (imagePacked & 0x80) offset += 3 * 2 ** ((imagePacked & 0x07) + 1);
-    if (offset >= bytes.length || bytes[offset] < 2 || bytes[offset] > 12) return false;
-    const blocks = consumeGifSubBlocks(bytes, offset + 1);
-    if (!blocks.complete || !blocks.sawData) return false;
-    offset = blocks.offset;
-    sawImage = true;
-  }
-  return false;
-};
-
-const validWebpBytes = (bytes) => {
-  if (
-    bytes.length < 20 ||
-    bytes.toString("ascii", 0, 4) !== "RIFF" ||
-    bytes.toString("ascii", 8, 12) !== "WEBP" ||
-    bytes.readUInt32LE(4) + 8 !== bytes.length
-  ) {
-    return false;
-  }
-  let offset = 12;
-  let sawImage = false;
-  let canvasDimensions = null;
-  while (offset + 8 <= bytes.length) {
-    const type = bytes.toString("ascii", offset, offset + 4);
-    const length = bytes.readUInt32LE(offset + 4);
-    const dataStart = offset + 8;
-    const dataEnd = dataStart + length;
-    if (dataEnd > bytes.length) return false;
-    if (type === "VP8X") {
-      if (length < 10) return false;
-      canvasDimensions = {
-        width: 1 + bytes.readUIntLE(dataStart + 4, 3),
-        height: 1 + bytes.readUIntLE(dataStart + 7, 3),
-      };
-      if (!dimensionsAreSafe(canvasDimensions.width, canvasDimensions.height)) return false;
-    } else if (type === "VP8 ") {
-      if (length <= 10 || bytes.toString("hex", dataStart + 3, dataStart + 6) !== "9d012a") {
-        return false;
-      }
-      if (
-        !dimensionsAreSafe(
-          bytes.readUInt16LE(dataStart + 6) & 0x3fff,
-          bytes.readUInt16LE(dataStart + 8) & 0x3fff,
-        )
-      ) {
-        return false;
-      }
-      sawImage = true;
-    } else if (type === "VP8L") {
-      if (length <= 5 || bytes[dataStart] !== 0x2f) return false;
-      const packed = bytes.readUInt32LE(dataStart + 1);
-      if (!dimensionsAreSafe((packed & 0x3fff) + 1, ((packed >>> 14) & 0x3fff) + 1)) {
-        return false;
-      }
-      sawImage = true;
-    }
-    offset = dataEnd + (length % 2);
-  }
-  return (
-    sawImage &&
-    offset === bytes.length &&
-    (!canvasDimensions || dimensionsAreSafe(canvasDimensions.width, canvasDimensions.height))
-  );
-};
-
-const imageSignatureMatches = (extension, bytes) => {
-  if (extension === ".png") {
-    return validatePngBytes(bytes);
-  }
-  if (extension === ".jpg" || extension === ".jpeg") {
-    return validJpegBytes(bytes);
-  }
-  if (extension === ".gif") {
-    return validGifBytes(bytes);
-  }
-  if (extension === ".webp") {
-    return validWebpBytes(bytes);
-  }
-  return false;
-};
 
 const skippedRecord = (sourceRelativePath, code, reason) => ({
   sourceRelativePath: toPortableRelativePath(sourceRelativePath),
@@ -474,150 +222,6 @@ const scanSourceDirectory = async (sourceRoot, prompt, promptFingerprint) => {
   return { items: discovered, skipped };
 };
 
-const validateItemUniqueness = (items) => {
-  const keys = new Map();
-  const outputs = new Map();
-  const collisions = [];
-  for (const item of items) {
-    const oldKey = keys.get(item.key);
-    if (oldKey) {
-      collisions.push(`任务键冲突：${oldKey} / ${item.sourceRelativePath}`);
-    } else {
-      keys.set(item.key, item.sourceRelativePath);
-    }
-    const outputKey = comparisonPathKey(item.outputRelativePath);
-    const previousSource = outputs.get(outputKey);
-    if (previousSource) {
-      collisions.push(
-        `输出同名冲突：${previousSource} / ${item.sourceRelativePath} -> ${item.outputRelativePath}`,
-      );
-    } else {
-      outputs.set(outputKey, item.sourceRelativePath);
-    }
-  }
-  if (collisions.length) {
-    throw new Error(`原图转换为 PNG 后发生同名冲突：${collisions.slice(0, 8).join("；")}`);
-  }
-};
-
-const terminalState = (state) => {
-  if (!isObject(state)) return false;
-  if (state.status === "completed") return true;
-  return (
-    state.status === "failed" &&
-    (state.terminal === true || (Number.isInteger(state.attempts) && state.attempts >= 2))
-  );
-};
-
-const queueHasIncompleteItems = (queue, progress) => {
-  if (!Array.isArray(queue?.items) || !queue.items.length) return false;
-  return queue.items.some((item) => !terminalState(progress?.items?.[item?.key]));
-};
-
-const validatePreviousState = (queue, progress) => {
-  if (!isObject(queue) || queue.version !== 1 || queue.operation !== "directory_redraw") {
-    throw new Error("现有批量重绘队列结构无效，禁止覆盖可能可恢复的任务");
-  }
-  if (
-    !Array.isArray(queue.items) ||
-    !cleanText(queue.batchId) ||
-    !cleanText(queue.builtAt) ||
-    !cleanText(queue.queueFingerprint)
-  ) {
-    throw new Error("现有批量重绘队列缺少批次、任务或指纹，禁止覆盖");
-  }
-  if (!isObject(progress) || !isObject(progress.items)) {
-    throw new Error("现有批量重绘进度结构无效，禁止覆盖可能可恢复的任务");
-  }
-  if (
-    progress.operation !== "directory_redraw" ||
-    cleanText(progress.batchId) !== cleanText(queue.batchId) ||
-    cleanText(progress.queueFingerprint) !== cleanText(queue.queueFingerprint)
-  ) {
-    throw new Error("现有批量重绘队列与进度指纹不一致，禁止猜测恢复");
-  }
-};
-
-const isBlankInitializedQueue = (value) =>
-  isObject(value) &&
-  value.operation === "directory_redraw" &&
-  Array.isArray(value.items) &&
-  value.items.length === 0 &&
-  Object.keys(value).every((key) => ["version", "operation", "items"].includes(key));
-
-const isBlankInitializedProgress = (value) =>
-  isObject(value) &&
-  value.operation === "directory_redraw" &&
-  isObject(value.items) &&
-  Object.keys(value.items).length === 0 &&
-  Object.keys(value).every((key) => ["version", "operation", "items"].includes(key));
-
-const expectedResumeOutput = (state, inputFingerprint) => {
-  if (!isObject(state) || state.inputFingerprint !== inputFingerprint) return false;
-  if (state.status === "completed") return true;
-  const remoteStatus = cleanText(state.remoteStatus);
-  return (
-    state.backend === "api" &&
-    ["completed", "download_installing", "download_interrupted", "download_retry"].includes(
-      remoteStatus,
-    )
-  );
-};
-
-const assertOutputTargetsAvailable = async (
-  outputRoot,
-  items,
-  { resume = false, progressItems = {} } = {},
-) => {
-  const checkedDirectories = new Set([normalizeCase(outputRoot)]);
-  const conflicts = [];
-  for (const item of items) {
-    const target = resolveInside(outputRoot, item.outputRelativePath, "重绘输出路径");
-    const parentRelative = path.posix.dirname(item.outputRelativePath);
-    const parentSegments = parentRelative === "." ? [] : parentRelative.split("/");
-    let current = outputRoot;
-    for (const segment of parentSegments) {
-      current = path.join(current, segment);
-      const cacheKey = normalizeCase(current);
-      if (checkedDirectories.has(cacheKey)) continue;
-      try {
-        const currentStat = await fs.lstat(current);
-        if (currentStat.isSymbolicLink()) {
-          throw new Error(`输出子目录不能是符号链接或目录联接：${current}`);
-        }
-        if (!currentStat.isDirectory()) {
-          throw new Error(`输出路径的父级不是文件夹：${current}`);
-        }
-        const realCurrent = await fs.realpath(current);
-        if (!isWithinOrSame(realCurrent, outputRoot)) {
-          throw new Error(`输出子目录解析后越出结果目录：${current}`);
-        }
-      } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
-      }
-      checkedDirectories.add(cacheKey);
-    }
-
-    try {
-      const targetStat = await fs.lstat(target);
-      const expected =
-        resume &&
-        targetStat.isFile() &&
-        !targetStat.isSymbolicLink() &&
-        expectedResumeOutput(progressItems[item.key], item.inputFingerprint);
-      if (!expected) conflicts.push(item.outputRelativePath);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-  }
-  if (conflicts.length) {
-    throw new Error(
-      `结果目录已存在本批次目标文件，禁止覆盖：${conflicts.slice(0, 8).join("、")}${
-        conflicts.length > 8 ? "…" : ""
-      }`,
-    );
-  }
-};
 
 const newBatchId = () => {
   const timestamp = new Date().toISOString().replace(/\D/g, "");
