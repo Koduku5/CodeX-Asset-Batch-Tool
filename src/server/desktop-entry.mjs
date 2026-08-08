@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { isAbsolute, resolve } from 'node:path';
 
-import { createPrototypeServer } from './server.mjs';
+import { createApplicationServer } from './server.mjs';
 import { createIntinifyCanvasService } from './intinify-canvas-service.mjs';
 
 const READY_TYPE = 'ka-prompt-studio-ready';
@@ -143,7 +143,7 @@ const exitCleanly = () => {
   setImmediate(() => process.exit(0));
 };
 
-const server = createPrototypeServer({
+  const server = createApplicationServer({
   desktopMode: true,
   capabilityToken,
   nativeCapabilityToken,

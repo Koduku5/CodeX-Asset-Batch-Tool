@@ -311,7 +311,7 @@ test('admin adapter keeps formal prompt library writes locked when the host brid
   const adapter = new RouteModuleAdminAdapter({ bridge: null });
   assert.deepEqual(adapter.getCapabilities(), { validate: false, save: false, importPackage: false, remove: false });
   const result = await adapter.validate(makeModule('forest-vegetation'));
-  assert.equal(result.source, 'prototype-local');
+  assert.equal(result.source, 'local-validation');
   await assert.rejects(() => adapter.save(makeModule('forest-vegetation')), /正式注册表写接口尚未接入/);
   await assert.rejects(() => adapter.remove('forest-vegetation'), /正式提示词库删除接口尚未接入/);
 });

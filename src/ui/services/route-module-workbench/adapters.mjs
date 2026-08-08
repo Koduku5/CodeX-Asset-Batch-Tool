@@ -90,7 +90,7 @@ export class RouteModuleAdminAdapter {
 
   async validate(module) {
     const local = validateRouteModule(module);
-    if (!local.valid || !this.getCapabilities().validate) return { source: 'prototype-local', ...local };
+    if (!local.valid || !this.getCapabilities().validate) return { source: 'local-validation', ...local };
     const remote = typeof this.bridge?.validateConditionModule === 'function'
       ? envelopeData(await this.bridge.validateConditionModule(local.module))
       : await this.request(
