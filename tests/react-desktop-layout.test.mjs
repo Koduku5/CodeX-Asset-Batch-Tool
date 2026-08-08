@@ -30,6 +30,8 @@ const readWorkbenchSource = async () => (await Promise.all([
   read('src/ui/features/prompt-studio/prompt-preset-store.tsx'),
   read('src/ui/features/prompt-studio/batch-custom-fields.ts'),
   read('src/ui/features/workbench/workbench-app.tsx'),
+  read('src/ui/features/workbench/workbench-shell.tsx'),
+  read('src/ui/features/workbench/workbench-view-model.ts'),
   read('src/ui/features/workbench/use-workbench-codex.ts'),
   read('src/ui/features/workbench/use-workbench-projects.ts'),
   read('src/ui/features/workbench/use-workbench-stage-timings.ts'),

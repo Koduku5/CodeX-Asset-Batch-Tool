@@ -1,18 +1,13 @@
 import * as React from "react"
 import {
   Activity,
-  AlertTriangle,
-  CheckCircle2,
   ChevronLeft,
   Database,
   FileOutput,
   FolderOpen,
-  LoaderCircle,
   RefreshCw,
-  X,
 } from "lucide-react"
 
-import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { PendingAssetDialog } from "@/features/pending-assets/pending-asset-dialog"
@@ -23,6 +18,8 @@ import { AssetOverview, PendingAssetBanner, PromptStudioLauncher } from "@/featu
 import { WorkbenchProjectDialogs } from "@/features/workbench/workbench-project-dialogs"
 import { CodexStatusCard, WorkbenchStatusBar } from "@/features/workbench/workbench-status-bar"
 import { WorkbenchTaskActivity } from "@/features/workbench/workbench-task-activity"
+import { useWorkbenchShell, WorkbenchToast } from "@/features/workbench/workbench-shell"
+import { deriveActivePipelineState, derivePipelinePresentation } from "@/features/workbench/workbench-view-model"
 import { useWorkbenchCodex } from "@/features/workbench/use-workbench-codex"
 import { useWorkbenchProjects } from "@/features/workbench/use-workbench-projects"
 import { useWorkbenchStageTimings } from "@/features/workbench/use-workbench-stage-timings"
@@ -30,50 +27,36 @@ import { useWorkbenchTasks } from "@/features/workbench/use-workbench-tasks"
 
 import {
   JsonRecord,
-  ToastState,
 } from "@/features/workbench/workbench-types"
 import {
   controlAdapter,
 } from "@/features/workbench/workbench-adapters"
 import {
-  PHASE_LABELS,
-  CURRENT_STAGE_LABELS,
-  TASK_STAGE_BY_ACTION,
-} from "@/features/workbench/workbench-constants"
-import {
   safeMessage,
-  percent,
 } from "@/features/workbench/workbench-utils"
 
 import { MemoPromptStudioDrawer } from "@/features/prompt-studio/prompt-studio-drawer"
 
 export default function App() {
-  const { resolvedTheme, setTheme } = useTheme()
-  const [motionMode, setMotionMode] = React.useState<"full" | "reduced">(() =>
-    localStorage.getItem("ka-prompt-studio.motion") === "reduced" ? "reduced" : "full",
-  )
-  const [drawerOpen, setDrawerOpen] = React.useState(false)
-  const [drawerMounted, setDrawerMounted] = React.useState(false)
-  const [drawerTab, setDrawerTab] = React.useState("batch")
+  const {
+    batchStudioButtonRef,
+    closeStudio,
+    drawerMounted,
+    drawerOpen,
+    drawerTab,
+    motionMode,
+    notify,
+    resolvedTheme,
+    setDrawerTab,
+    setStudioOpen,
+    setToast,
+    toast,
+    toggleMotion,
+    toggleTheme,
+  } = useWorkbenchShell()
   const [pendingAssetDialogOpen, setPendingAssetDialogOpen] = React.useState(false)
   const [busyAction, setBusyAction] = React.useState<string | null>(null)
-  const [toast, setToast] = React.useState<ToastState | null>(null)
-  const toastSequence = React.useRef(0)
-  const drawerPhase = React.useRef<"closed" | "opening" | "open" | "closing">("closed")
-  const drawerReturnFocus = React.useRef<HTMLElement | null>(null)
-  const batchStudioButtonRef = React.useRef<HTMLButtonElement>(null)
   const promptedPendingStates = React.useRef(new Set<string>())
-
-  const notify = React.useCallback((message: string, tone: ToastState["tone"] = "good") => {
-    const id = ++toastSequence.current
-    setToast({ id, message, tone })
-    if (tone !== "error") {
-      window.setTimeout(
-        () => setToast((current) => current?.id === id ? null : current),
-        tone === "warning" ? 6500 : 3600,
-      )
-    }
-  }, [])
 
   const {
     activeProject,
@@ -121,12 +104,12 @@ export default function App() {
     watchTask,
   } = useWorkbenchTasks({ activeProjectId, notify, refreshProjects, setBusyAction })
 
-  const rawPipelinePhase = snapshot?.pipeline?.phase ?? activeProject?.statusSummary?.phase ?? "split"
-  const activeTaskStageId = activeProjectHasRunningTask
-    ? activeTask?.action === "run-full-pipeline" || activeTask?.action === "build-scoped-workbook"
-      ? rawPipelinePhase === "waiting-generation" || rawPipelinePhase === "complete" ? "excel" : rawPipelinePhase
-      : TASK_STAGE_BY_ACTION[activeTask?.action]
-    : null
+  const { rawPipelinePhase, activeTaskStageId } = deriveActivePipelineState({
+    snapshot,
+    activeProject,
+    activeTask,
+    activeProjectHasRunningTask,
+  })
 
   const {
     activeStageElapsedSeconds,
@@ -178,87 +161,6 @@ export default function App() {
   React.useEffect(() => {
     setPendingAssetDialogOpen(false)
   }, [activeTask?.taskId])
-
-  React.useEffect(() => {
-    const timer = window.setTimeout(() => {
-      React.startTransition(() => setDrawerMounted(true))
-    }, 350)
-    return () => window.clearTimeout(timer)
-  }, [])
-
-  React.useEffect(() => {
-    document.documentElement.dataset.motion = motionMode
-    localStorage.setItem("ka-prompt-studio.motion", motionMode)
-  }, [motionMode])
-
-  const setStudioOpen = React.useCallback((open: boolean, tab = drawerTab) => {
-    if (open && drawerPhase.current === "open") {
-      setDrawerTab(tab)
-      return
-    }
-    if (!open && drawerPhase.current === "closed") return
-
-    drawerPhase.current = open ? "open" : "closed"
-    if (open) {
-      setDrawerTab(tab)
-      drawerReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      setDrawerMounted(true)
-      setDrawerOpen(true)
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => document.getElementById("prompt-studio-drawer")?.focus())
-      })
-    } else {
-      setDrawerOpen(false)
-      const returnTarget = drawerReturnFocus.current?.isConnected ? drawerReturnFocus.current : batchStudioButtonRef.current
-      window.requestAnimationFrame(() => returnTarget?.focus())
-      drawerReturnFocus.current = null
-    }
-  }, [drawerTab])
-
-  const closeStudio = React.useCallback(() => {
-    void setStudioOpen(false)
-  }, [setStudioOpen])
-
-  React.useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing) return
-      const eventTarget = event.target instanceof HTMLElement ? event.target : null
-      const editingText = Boolean(eventTarget?.closest('input, textarea, select, [contenteditable="true"]'))
-      const nestedDialog = document.querySelector('[role="dialog"]:not(#prompt-studio-drawer), [role="alertdialog"]')
-      if (!editingText && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
-        event.preventDefault()
-        void setStudioOpen(!drawerOpen, "batch")
-      }
-      if (!editingText && (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "p") {
-        event.preventDefault()
-        void setStudioOpen(true, "routes")
-      }
-      if (event.key === "Tab" && drawerOpen && !nestedDialog) {
-        const drawer = document.getElementById("prompt-studio-drawer")
-        const focusable = drawer
-          ? [...drawer.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
-              .filter((element) => element.getClientRects().length > 0)
-          : []
-        if (!drawer || !focusable.length) {
-          event.preventDefault()
-          drawer?.focus()
-        } else {
-          const first = focusable[0]
-          const last = focusable[focusable.length - 1]
-          const active = document.activeElement
-          if (!drawer.contains(active) || (event.shiftKey && active === first) || (!event.shiftKey && active === last)) {
-            event.preventDefault()
-            ;(event.shiftKey ? last : first).focus()
-          }
-        }
-      }
-      if (event.key === "Escape" && drawerOpen && !nestedDialog) {
-        setStudioOpen(false)
-      }
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [drawerOpen, setStudioOpen])
 
   const runTask = React.useCallback(async (
     action: string,
@@ -328,76 +230,28 @@ export default function App() {
     if (completed) markProposalConfirmed(messageId)
   }, [activeProjectHasRunningTask, confirmedAgentProposalIds, markProposalConfirmed, notify, pauseCurrentTask, refreshProjects, runTask])
 
-  const summary = activeProject?.statusSummary ?? {}
-  const batchCounts = snapshot?.batch?.counts ?? {}
-  const activeProjectIsIsolated = activeProject?.storageMode === "isolated-project"
-  const pendingAssetCount = snapshot?.pending?.known === true
-    ? Math.max(0, Number(snapshot.pending.count) || 0)
-    : 0
-  const pipelineStages = snapshot?.pipeline?.stages ?? [
-    { id: "split", label: "剧本切分", state: "idle" },
-    { id: "analysis", label: "分析与累计", state: "idle" },
-    { id: "world-overview", label: "世界观总览", state: "idle" },
-    { id: "asset-visual-specs", label: "资产设定", state: "idle" },
-    { id: "excel", label: "Excel 制表", state: "idle" },
-    { id: "generation", label: "资产出图", state: "idle" },
-  ]
-  const pendingAssetsReady = pendingAssetCount > 0
-    && pipelineStages.find((stage: JsonRecord) => stage.id === "analysis")?.state === "complete"
-    && pipelineStages.find((stage: JsonRecord) => stage.id === "world-overview")?.state === "complete"
-  const startTaskAction = pendingAssetCount === 0 && rawPipelinePhase === "asset-visual-specs"
-    ? "finalize-after-confirmation"
-    : "run-full-pipeline"
-  const displayPipelineStages = pipelineStages.map((stage: JsonRecord) => {
-    if (activeTask?.status === "paused" && stage.state === "active") return { ...stage, state: "warning" }
-    if (!activeTaskActuallyRunning && stage.state === "active") return { ...stage, state: "waiting" }
-    if (activeTaskActuallyRunning && activeTaskStageId === stage.id) return { ...stage, state: "active" }
-    return stage
+  const {
+    activeProjectIsIsolated,
+    batchCounts,
+    currentStageLabel,
+    displayPipelineStages,
+    pendingAssetCount,
+    pendingAssetsReady,
+    screenplaySource,
+    showSummaryProgressPercent,
+    showVisualSpecsCard,
+    startTaskAction,
+    summary,
+    summaryProgress,
+    visualSpecsTask,
+  } = derivePipelinePresentation({
+    snapshot,
+    activeProject,
+    activeTask,
+    activeTaskActuallyRunning,
+    activeTaskStageId,
+    rawPipelinePhase,
   })
-  const currentPipelinePhase = activeTaskStageId ?? rawPipelinePhase
-  const analysisStage = pipelineStages.find((stage: JsonRecord) => stage.id === "analysis")
-  const currentAnalysisEpisode = typeof analysisStage?.currentEpisode === "number"
-    && Number.isInteger(analysisStage.currentEpisode)
-    && analysisStage.currentEpisode > 0
-      ? analysisStage.currentEpisode
-      : null
-  const currentStageLabel = pendingAssetsReady && !activeTaskActuallyRunning
-    ? "等待人工确认"
-    : activeTask?.status === "paused"
-      ? "流水线已暂停"
-    : activeTask?.status === "pausing"
-      ? "流水线正在暂停"
-      : activeTask?.status === "queued"
-        ? "任务已排队"
-      : !activeTaskActuallyRunning && currentPipelinePhase !== "complete"
-        ? currentPipelinePhase === "analysis" && currentAnalysisEpisode !== null
-          ? `剧本分析 - 第 ${currentAnalysisEpisode} 集（未运行）`
-          : `${PHASE_LABELS[currentPipelinePhase] ?? "流水线"}（未运行）`
-      : currentPipelinePhase === "analysis" && currentAnalysisEpisode !== null
-        ? `剧本分析 - 第 ${currentAnalysisEpisode} 集分析中`
-        : CURRENT_STAGE_LABELS[currentPipelinePhase] ?? `${PHASE_LABELS[currentPipelinePhase] ?? "流水线"}中`
-  const visualSpecsStage = pipelineStages.find((stage: JsonRecord) => stage.id === "asset-visual-specs")
-  const visualSpecsTask = snapshot?.pipeline?.currentTask?.scope === "asset-visual-specs"
-    ? snapshot.pipeline.currentTask
-    : null
-  const showVisualSpecsCard = activeTaskActuallyRunning && (currentPipelinePhase === "asset-visual-specs"
-    || visualSpecsStage?.state === "active")
-  const screenplaySource = snapshot?.screenplay?.label
-    ?? snapshot?.screenplay?.filename
-    ?? "尚未导入剧本"
-  const completedStageCount = displayPipelineStages.filter((stage: JsonRecord) => stage.state === "complete").length
-  const activePipelineStage = displayPipelineStages.find((stage: JsonRecord) => stage.state === "active")
-  const activeStageProgress = activePipelineStage?.progress?.mode === "determinate"
-    ? percent(activePipelineStage.progress.done, activePipelineStage.progress.total)
-    : null
-  const summaryProgress = currentPipelinePhase === "complete"
-    ? 100
-    : displayPipelineStages.length
-      ? Math.min(100, ((completedStageCount + (activeStageProgress ?? 0) / 100) / displayPipelineStages.length) * 100)
-      : 0
-  const showSummaryProgressPercent = currentPipelinePhase === "complete"
-    || !activePipelineStage
-    || activeStageProgress !== null
 
   React.useEffect(() => {
     if (!activeProjectId) return
@@ -425,8 +279,8 @@ export default function App() {
             projectElapsedSeconds={projectElapsedSeconds}
             motionMode={motionMode}
             resolvedTheme={resolvedTheme}
-            toggleMotion={() => setMotionMode((value) => value === "full" ? "reduced" : "full")}
-            toggleTheme={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+            toggleMotion={toggleMotion}
+            toggleTheme={toggleTheme}
           />
 
           <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
@@ -635,21 +489,7 @@ export default function App() {
         }}
       />
 
-      {toast && (
-        <div role={toast.tone === "error" ? "alert" : "status"} aria-live={toast.tone === "error" ? "assertive" : "polite"} className={cn(
-          "fixed top-14 right-4 z-[80] flex w-[min(calc(100vw-2rem),520px)] items-start gap-3 rounded-xl border bg-popover px-4 py-3 text-sm text-popover-foreground shadow-overlay animate-popover-in",
-          toast.tone === "error" && "border-destructive/45",
-          toast.tone === "warning" && "border-warning/45",
-          toast.tone === "good" && "border-success/35",
-        )}>
-          {toast.tone === "good" ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" /> : <AlertTriangle className={cn("mt-0.5 size-4 shrink-0", toast.tone === "error" ? "text-destructive" : "text-warning")} />}
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold">{toast.tone === "error" ? "操作失败" : toast.tone === "warning" ? "请注意" : "操作完成"}</p>
-            <p className="mt-0.5 break-words text-xs leading-relaxed text-muted-foreground">{toast.message}</p>
-          </div>
-          <Button variant="ghost" size="icon-sm" className="-mr-2 -mt-1" onClick={() => setToast(null)} aria-label="关闭提示"><X /></Button>
-        </div>
-      )}
+      <WorkbenchToast toast={toast} close={() => setToast(null)} />
     </div>
   )
 }
