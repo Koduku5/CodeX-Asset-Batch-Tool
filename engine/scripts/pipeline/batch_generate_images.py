@@ -3,20 +3,15 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import mimetypes
 import os
 import socket
-import stat as stat_module
 import sys
-import threading
 import time
 import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from pathlib import Path, PurePosixPath
-from urllib.error import HTTPError, URLError
-from urllib.request import ProxyHandler, Request, build_opener
+from pathlib import Path
+from urllib.request import ProxyHandler, build_opener
 
 
 LIB_DIR = Path(__file__).resolve().parents[1] / "lib"
@@ -28,29 +23,50 @@ from api_security import (  # noqa: E402
     normalize_base_url,
     require_secure_transport,
     resolves_only_to_private_addresses,
-    same_origin_url,
 )
-from bounded_io import (  # noqa: E402
-    InvalidJsonResponseError,
-    MAX_API_ERROR_RESPONSE_BYTES,
-    MAX_API_JSON_RESPONSE_BYTES,
-    MAX_IMAGE_RESPONSE_BYTES,
-    ResponseTooLargeError,
-    copy_limited_response,
-    decode_strict_json_bytes,
-    read_limited_bytes,
-)
-from api_batch.image_validation import (  # noqa: E402
-    read_stable_reference_bytes,
-    valid_png,
-    valid_reference_image,
-)
+from api_batch.image_validation import valid_png  # noqa: E402
 from api_batch.canvas_layout import save_canvas_nodes  # noqa: E402
 from api_batch.progress_store import (  # noqa: E402
     ProgressStore,
     attempt_entry_for,
     clean_text,
     normalize_attempt_ledger,
+)
+from api_batch.remote_client import (  # noqa: E402
+    APIError,
+    AuthSession,
+    NetworkError,
+    OutputConflictError,
+    SubmissionGate,
+    SubmissionNotFound,
+    SubmissionsStopped,
+    configure_remote_api,
+    download_first_valid_image,
+    failure_details,
+    submit_task,
+    upload_image,
+    wait_for_result,
+)
+from api_batch.file_runtime import (  # noqa: E402
+    configure_file_runtime,
+    file_snapshot,
+    install_candidate_file_snapshot,
+    install_downloaded_file_without_overwrite,
+    normalize_install_candidate_snapshot,
+    read_json,
+    require_new_output_target,
+    require_unchanged_missing_output_baseline,
+    resolve_output,
+    write_json_atomic,
+)
+from api_batch.queue_runtime import (  # noqa: E402
+    api_execution_fingerprint,
+    configure_queue_runtime,
+    load_queue,
+    queue_execution_fingerprint,
+    queue_freshness_errors,
+    queue_operation,
+    resolve_reference_file,
 )
 
 
@@ -76,20 +92,8 @@ TERMINAL_CODES = {
     "image.upload_too_large",
     "project_group_image_generation_disabled",
 }
-REFERENCE_HASH_CACHE: dict[tuple[str, int, int], str] = {}
-REFERENCE_HASH_MUTEX = threading.Lock()
 
 
-def stable_file_sha256(path: Path, initial_stat=None) -> tuple[str, os.stat_result]:
-    stat = initial_stat or path.stat()
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    final_stat = path.stat()
-    if (final_stat.st_size, final_stat.st_mtime_ns) != (stat.st_size, stat.st_mtime_ns):
-        raise OSError(f"文件在校验期间发生变化：{path}")
-    return digest.hexdigest(), stat
 
 
 def required_env(name: str) -> str:
@@ -154,8 +158,12 @@ LOCK_PATH = CACHE_DIR / ".pipeline.lock"
 GUARD_PATH = CACHE_DIR / ".pipeline.api.guard"
 IMAGE_OUTPUT_ROOT_PATH = SKILL_ROOT / "输出" / "资产图"
 IMAGE_OUTPUT_ROOT = IMAGE_OUTPUT_ROOT_PATH.resolve()
-DIRECTORY_REDRAW_SOURCE_ROOT: Path | None = None
-DIRECTORY_REDRAW_OUTPUT_ROOT: Path | None = None
+
+configure_file_runtime(
+    skill_root=SKILL_ROOT,
+    image_output_root=IMAGE_OUTPUT_ROOT,
+    directory_redraw_mode=DIRECTORY_REDRAW_MODE,
+)
 
 def validated_base_url(value: str) -> str:
     try:
@@ -187,81 +195,29 @@ except ValueError as error:
     raise SystemExit(f"KA_API_BASE_URL is unsafe: {error}") from error
 DIRECT_API_CONNECTION = resolves_only_to_private_addresses(BASE_URL)
 
+configure_queue_runtime(
+    image_sheet_order=IMAGE_SHEET_ORDER,
+    queue_version=QUEUE_VERSION,
+    directory_redraw_mode=DIRECTORY_REDRAW_MODE,
+    only_key=ONLY_KEY,
+    queue_path=QUEUE_PATH,
+    progress_path=PROGRESS_PATH,
+    skill_root=SKILL_ROOT,
+    cache_dir=CACHE_DIR,
+    image_output_root=IMAGE_OUTPUT_ROOT,
+    image_output_root_path=IMAGE_OUTPUT_ROOT_PATH,
+    base_url=BASE_URL,
+    project_id=PROJECT_ID,
+    model_id=MODEL_ID,
+    default_aspect_ratio=DEFAULT_ASPECT_RATIO,
+    default_image_size=DEFAULT_IMAGE_SIZE,
+)
+
 
 def proxy_handler() -> ProxyHandler:
     return ProxyHandler({}) if DIRECT_API_CONNECTION else ProxyHandler()
 
 
-class APIError(RuntimeError):
-    def __init__(self, status: int, payload):
-        super().__init__(f"HTTP {status}: {payload}")
-        self.status = status
-        self.payload = payload if isinstance(payload, dict) else {"message": str(payload)}
-        self.code = str(
-            self.payload.get("error_code")
-            or self.payload.get("failure_code")
-            or ""
-        ).strip()
-        self.category = str(self.payload.get("failure_category") or "").strip()
-
-
-class NetworkError(RuntimeError):
-    pass
-
-
-class OutputConflictError(RuntimeError):
-    pass
-
-
-class SubmissionNotFound(RuntimeError):
-    pass
-
-
-class SubmissionsStopped(RuntimeError):
-    pass
-
-
-class SubmissionGate:
-    """Serialize POST admission so a global stop cannot race with another submit."""
-
-    def __init__(self, freshness_check=None):
-        self._mutex = threading.Lock()
-        self._stopped = threading.Event()
-        self._freshness_check = freshness_check
-
-    def stopped(self) -> bool:
-        return self._stopped.is_set()
-
-    def stop(self) -> None:
-        self._stopped.set()
-
-    def submit(self, callback):
-        with self._mutex:
-            if self._stopped.is_set():
-                raise SubmissionsStopped("new remote submissions are stopped for this run")
-            try:
-                freshness_errors = (
-                    self._freshness_check() if self._freshness_check is not None else []
-                )
-                if freshness_errors:
-                    raise SubmissionsStopped(
-                        "image queue changed before submission: "
-                        + "; ".join(freshness_errors)
-                    )
-                return callback()
-            except Exception as error:
-                if isinstance(error, APIError):
-                    global_stop = (
-                        error.status in {401, 403, 408, 425, 429, 500, 502, 503, 504}
-                        or error.code
-                        in {"task.user_limit", "project_group_image_generation_disabled"}
-                    )
-                else:
-                    # Malformed success bodies and all non-HTTP failures are ambiguous.
-                    global_stop = True
-                if global_stop:
-                    self._stopped.set()
-                raise
 
 
 class BatchLock:
@@ -273,802 +229,34 @@ class BatchLock:
         return self.payload.get(key, default)
 
 
-def normalize_prompt_text(value) -> str:
-    return str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
-def json_fingerprint(payload: dict) -> str:
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
-def canonical_fingerprint(payload) -> str:
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
-_MISSING = object()
 
+API_OPENER = build_opener(proxy_handler(), SameOriginRedirectHandler(BASE_URL))
+IMAGE_OPENER = build_opener(proxy_handler(), SameOriginRedirectHandler(BASE_URL))
+configure_remote_api(
+    api_opener=API_OPENER,
+    image_opener=IMAGE_OPENER,
+    api_url=API_URL,
+    base_url=BASE_URL,
+    username=USERNAME,
+    password=PASSWORD,
+    project_id=PROJECT_ID,
+    model_id=MODEL_ID,
+    default_aspect_ratio=DEFAULT_ASPECT_RATIO,
+    default_image_size=DEFAULT_IMAGE_SIZE,
+    max_image_attempts=MAX_IMAGE_ATTEMPTS,
+    retryable_codes=RETRYABLE_CODES,
+    terminal_codes=TERMINAL_CODES,
+    resolve_reference_file=resolve_reference_file,
+    install_candidate_file_snapshot=install_candidate_file_snapshot,
+    install_downloaded_file_without_overwrite=install_downloaded_file_without_overwrite,
+)
 
-def read_json(path: Path, fallback=_MISSING):
-    try:
-        with path.open(encoding="utf-8-sig") as source:
-            return json.load(source)
-    except FileNotFoundError:
-        if fallback is not _MISSING:
-            return fallback
-        raise
-
-
-def write_json_atomic(path: Path, value) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        with temporary.open("w", encoding="utf-8", newline="\n") as output:
-            json.dump(value, output, ensure_ascii=False, indent=2)
-            output.write("\n")
-            output.flush()
-            os.fsync(output.fileno())
-        for attempt in range(4):
-            try:
-                os.replace(temporary, path)
-                return
-            except PermissionError:
-                if attempt == 3:
-                    raise
-                time.sleep(0.05 * (attempt + 1))
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def resolve_output(relative_path: str) -> Path:
-    if not clean_text(relative_path):
-        raise ValueError("queue item outputPath is empty")
-    candidate = Path(relative_path)
-    if DIRECTORY_REDRAW_MODE:
-        root = DIRECTORY_REDRAW_OUTPUT_ROOT
-        if root is None:
-            raise ValueError("directory redraw output root is not configured")
-        target = (root / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
-    else:
-        root = IMAGE_OUTPUT_ROOT
-        target = (SKILL_ROOT / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
-    try:
-        common = Path(os.path.commonpath([str(target), str(root)]))
-    except ValueError as error:
-        raise ValueError(f"output path escapes configured output root: {relative_path}") from error
-    if os.path.normcase(str(common)) != os.path.normcase(str(root)):
-        raise ValueError(f"output path escapes configured output root: {relative_path}")
-    return target
-
-
-def is_within(path: Path, root: Path) -> bool:
-    try:
-        common = Path(os.path.commonpath([str(path.resolve()), str(root.resolve())]))
-    except ValueError:
-        return False
-    return os.path.normcase(str(common)) == os.path.normcase(str(root.resolve()))
-
-
-def is_reparse_or_symlink(path: Path) -> bool:
-    info = os.lstat(path)
-    attributes = int(getattr(info, "st_file_attributes", 0) or 0)
-    reparse_flag = int(getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0) or 0)
-    return stat_module.S_ISLNK(info.st_mode) or bool(reparse_flag and attributes & reparse_flag)
-
-
-def require_stable_real_directory(path: Path, label: str) -> Path:
-    declared = Path(os.path.abspath(path))
-    if not declared.is_dir():
-        raise SystemExit(f"{label}不存在：{declared}")
-    if is_reparse_or_symlink(declared):
-        raise SystemExit(f"{label}不能是符号链接或目录联接：{declared}")
-    resolved = declared.resolve()
-    if os.path.normcase(str(resolved)) != os.path.normcase(str(declared)):
-        raise SystemExit(f"{label}真实路径已变化，请重新建立批量重绘队列：{declared}")
-    return resolved
-
-
-def reject_reparse_segments(root: Path, parts: tuple[str, ...], label: str) -> None:
-    current = root
-    for part in parts:
-        current = current / part
-        try:
-            if is_reparse_or_symlink(current):
-                raise SystemExit(f"{label}不能经过符号链接或目录联接：{current}")
-        except FileNotFoundError:
-            break
-
-
-def cached_file_sha256(path: Path) -> str:
-    stat = path.stat()
-    key = (os.path.normcase(str(path.resolve())), stat.st_size, stat.st_mtime_ns)
-    with REFERENCE_HASH_MUTEX:
-        cached = REFERENCE_HASH_CACHE.get(key)
-    if cached:
-        return cached
-    digest, _ = stable_file_sha256(path, stat)
-    with REFERENCE_HASH_MUTEX:
-        stale = [entry for entry in REFERENCE_HASH_CACHE if entry[0] == key[0]]
-        for entry in stale:
-            REFERENCE_HASH_CACHE.pop(entry, None)
-        REFERENCE_HASH_CACHE[key] = digest
-    return digest
-
-
-def file_snapshot(path: Path) -> dict:
-    try:
-        digest, stat = stable_file_sha256(path)
-    except FileNotFoundError:
-        return {"exists": False}
-    return {
-        "exists": True,
-        "size": stat.st_size,
-        "mtimeMs": stat.st_mtime_ns / 1_000_000,
-        "sha256": digest,
-    }
-
-
-def install_candidate_file_snapshot(path: Path) -> dict:
-    """Return the content identity persisted before publishing a download."""
-    digest, stat = stable_file_sha256(path)
-    return {
-        "size": stat.st_size,
-        "sha256": digest,
-    }
-
-
-def normalize_install_candidate_snapshot(value: object) -> dict | None:
-    if not isinstance(value, dict):
-        return None
-    size = value.get("size")
-    digest = value.get("sha256")
-    if not isinstance(size, int) or isinstance(size, bool) or size < 0:
-        return None
-    if (
-        not isinstance(digest, str)
-        or len(digest) != 64
-        or any(character not in "0123456789abcdef" for character in digest)
-    ):
-        return None
-    return {
-        "size": size,
-        "sha256": digest,
-    }
-
-
-def require_new_output_target(path: Path) -> dict:
-    """Return the missing baseline required for a new remote submission."""
-    try:
-        path.lstat()
-    except FileNotFoundError:
-        return {"exists": False}
-    raise OutputConflictError(f"目标文件已存在，禁止提交会覆盖它的远端任务：{path}")
-
-
-def require_unchanged_missing_output_baseline(path: Path, baseline: object) -> dict:
-    """Fail closed unless a recovery download is still bound to a missing target."""
-    if not isinstance(baseline, dict) or type(baseline.get("exists")) is not bool:
-        raise OutputConflictError(f"任务缺少可靠的提交前输出基线，禁止下载覆盖：{path}")
-    try:
-        current = file_snapshot(path)
-    except (IsADirectoryError, OSError) as error:
-        raise OutputConflictError(f"无法验证当前输出目标，禁止下载覆盖：{path}（{error}）") from error
-    if current != baseline:
-        raise OutputConflictError(f"输出目标在远端提交后发生变化，禁止下载覆盖：{path}")
-    if current.get("exists") is True:
-        raise OutputConflictError(f"远端提交前输出目标已存在，禁止下载覆盖：{path}")
-    return current
-
-
-def install_downloaded_file_without_overwrite(
-    temporary: Path,
-    output_path: Path,
-    baseline: object,
-) -> None:
-    """Atomically publish a same-directory temporary file only when target is absent."""
-    require_unchanged_missing_output_baseline(output_path, baseline)
-    try:
-        if os.name == "nt":
-            # Windows rename is an atomic no-replace operation. Unlike hard links,
-            # it also works on FAT/exFAT and many network-backed volumes.
-            os.rename(temporary, output_path)
-        else:
-            # POSIX rename replaces an existing target, so retain link-based
-            # no-replace publication there.
-            os.link(temporary, output_path)
-    except FileExistsError as error:
-        raise OutputConflictError(f"结果文件在下载期间出现，已停止覆盖：{output_path}") from error
-    except OSError as error:
-        raise RuntimeError(f"无法以不覆盖方式安装结果图片：{output_path}（{error}）") from error
-
-
-def valid_api_prompt_batch(queue: dict) -> bool:
-    prompt_batch = queue.get("apiPromptBatch")
-    return (
-        isinstance(prompt_batch, dict)
-        and set(prompt_batch) == {"version", "confirmedAt", "bySheet"}
-        and prompt_batch.get("version") == 2
-        and bool(clean_text(prompt_batch.get("confirmedAt")))
-        and isinstance(prompt_batch.get("bySheet"), dict)
-        and set(prompt_batch["bySheet"]) == set(IMAGE_SHEET_ORDER)
-        and all(isinstance(prompt_batch["bySheet"].get(name), str) for name in IMAGE_SHEET_ORDER)
-    )
-
-
-def queue_operation(queue: dict) -> str:
-    operation = clean_text(queue.get("operation")) or "generate"
-    if operation not in {"generate", "reference_redraw", "directory_redraw"}:
-        raise SystemExit(f"出图队列 operation 无效：{operation}")
-    return operation
-
-
-def validate_reference_redraw_structure(queue: dict) -> None:
-    metadata = queue.get("referenceRedraw")
-    if not isinstance(metadata, dict) or set(metadata) != {
-        "version",
-        "batchId",
-        "sourceRoot",
-        "outputRoot",
-        "candidateCount",
-        "sourceCount",
-        "skippedMissingSources",
-    }:
-        raise SystemExit("API 重绘队列缺少有效的 referenceRedraw 元数据")
-    batch_id = clean_text(metadata.get("batchId"))
-    if (
-        metadata.get("version") != 1
-        or not batch_id.startswith("batch-")
-        or len(batch_id) != 23
-        or not batch_id[6:].isdigit()
-        or metadata.get("sourceRoot") != "输出/资产图"
-        or metadata.get("outputRoot") != f"输出/资产图/API重绘/{batch_id}"
-        or not isinstance(metadata.get("candidateCount"), int)
-        or not isinstance(metadata.get("sourceCount"), int)
-        or not isinstance(metadata.get("skippedMissingSources"), list)
-        or metadata["sourceCount"] != len(queue.get("items", []))
-        or metadata["candidateCount"]
-        != metadata["sourceCount"] + len(metadata["skippedMissingSources"])
-    ):
-        raise SystemExit("API 重绘队列 referenceRedraw 元数据无效")
-    if not queue.get("items"):
-        raise SystemExit("API 重绘队列没有可执行任务")
-
-    redraw_base_root = (IMAGE_OUTPUT_ROOT / "API重绘").resolve()
-    redraw_root = (redraw_base_root / batch_id).resolve()
-    for item in queue["items"]:
-        references = item.get("references")
-        snapshots = item.get("referenceSnapshots")
-        if item.get("operation") != "reference_redraw":
-            raise SystemExit(f"API 重绘任务缺少 operation：{item.get('key', '未知任务')}")
-        if not isinstance(references, list) or len(references) != 1:
-            raise SystemExit(f"API 重绘任务必须且只能绑定一张原图：{item.get('key', '未知任务')}")
-        if not isinstance(snapshots, list) or len(snapshots) != 1:
-            raise SystemExit(f"API 重绘任务缺少原图快照：{item.get('key', '未知任务')}")
-        snapshot = snapshots[0]
-        if (
-            not isinstance(snapshot, dict)
-            or set(snapshot) != {"path", "size", "sha256"}
-            or snapshot.get("path") != references[0]
-            or not isinstance(snapshot.get("size"), int)
-            or snapshot["size"] <= 0
-            or snapshot["size"] > 20 * 1024 * 1024
-            or not isinstance(snapshot.get("sha256"), str)
-            or len(snapshot["sha256"]) != 64
-        ):
-            raise SystemExit(f"API 重绘任务原图快照无效：{item.get('key', '未知任务')}")
-        try:
-            reference_path = resolve_skill_file(references[0], "reference")
-            output_path = resolve_output(item.get("outputPath", ""))
-        except ValueError as error:
-            raise SystemExit(str(error)) from error
-        if not is_within(reference_path, IMAGE_OUTPUT_ROOT) or is_within(
-            reference_path, redraw_base_root
-        ):
-            raise SystemExit(f"API 重绘原图必须位于标准资产图分类目录：{references[0]}")
-        if not is_within(output_path, redraw_root):
-            raise SystemExit(f"API 重绘结果必须写入 输出/资产图/API重绘：{item.get('outputPath')}")
-        if os.path.normcase(str(reference_path)) == os.path.normcase(str(output_path)):
-            raise SystemExit(f"API 重绘结果禁止覆盖原图：{references[0]}")
-
-
-def is_sha256(value) -> bool:
-    text = clean_text(value).lower()
-    return len(text) == 64 and all(character in "0123456789abcdef" for character in text)
-
-
-def safe_relative_parts(value: str, label: str) -> tuple[str, ...]:
-    text = str(value or "").replace("\\", "/")
-    pure = PurePosixPath(text)
-    if (
-        not text
-        or pure.is_absolute()
-        or str(pure) != text
-        or any(part in {"", ".", ".."} or ":" in part for part in pure.parts)
-    ):
-        raise SystemExit(f"{label}不是安全相对路径：{value}")
-    return pure.parts
-
-
-def validate_directory_redraw_structure(queue: dict) -> None:
-    global DIRECTORY_REDRAW_SOURCE_ROOT, DIRECTORY_REDRAW_OUTPUT_ROOT
-
-    required_fields = {
-        "version",
-        "operation",
-        "batchId",
-        "builtAt",
-        "sourceRoot",
-        "outputRoot",
-        "prompt",
-        "promptFingerprint",
-        "recursive",
-        "candidateCount",
-        "sourceCount",
-        "skipped",
-        "items",
-        "queueFingerprint",
-    }
-    if set(queue) != required_fields:
-        raise SystemExit("文件夹批量重绘队列字段无效，请重新建立")
-    batch_id = clean_text(queue.get("batchId"))
-    prompt = normalize_prompt_text(queue.get("prompt"))
-    if (
-        queue.get("version") != 1
-        or queue.get("operation") != "directory_redraw"
-        or not batch_id
-        or not clean_text(queue.get("builtAt"))
-        or not prompt
-        or queue.get("prompt") != prompt
-        or not is_sha256(queue.get("promptFingerprint"))
-        or queue.get("recursive") is not True
-        or not isinstance(queue.get("candidateCount"), int)
-        or not isinstance(queue.get("sourceCount"), int)
-        or not isinstance(queue.get("skipped"), list)
-        or not isinstance(queue.get("items"), list)
-        or not is_sha256(queue.get("queueFingerprint"))
-        or queue["sourceCount"] != len(queue["items"])
-        or queue["candidateCount"] != queue["sourceCount"] + len(queue["skipped"])
-    ):
-        raise SystemExit("文件夹批量重绘队列结构无效，请重新建立")
-    if not queue["items"]:
-        raise SystemExit("文件夹批量重绘队列没有可执行图片")
-
-    source_root_value = Path(clean_text(queue.get("sourceRoot")))
-    output_root_value = Path(clean_text(queue.get("outputRoot")))
-    if not source_root_value.is_absolute() or not output_root_value.is_absolute():
-        raise SystemExit("文件夹批量重绘的原图与结果目录必须是绝对路径")
-    source_root = require_stable_real_directory(source_root_value, "文件夹批量重绘原图目录")
-    output_root = require_stable_real_directory(output_root_value, "文件夹批量重绘结果目录")
-    if source_root == Path(source_root.anchor) or output_root == Path(output_root.anchor):
-        raise SystemExit("禁止把磁盘根目录作为批量重绘目录")
-    if not source_root.is_dir() or not output_root.is_dir():
-        raise SystemExit("文件夹批量重绘的原图或结果目录不存在")
-    skill_root = SKILL_ROOT.resolve()
-    if (
-        is_within(source_root, skill_root)
-        or is_within(skill_root, source_root)
-        or is_within(output_root, skill_root)
-        or is_within(skill_root, output_root)
-    ):
-        raise SystemExit("原图和结果目录必须与 Skill 项目目录完全分离")
-    if is_within(source_root, output_root) or is_within(output_root, source_root):
-        raise SystemExit("原图目录与结果目录不能相同或互相嵌套")
-    DIRECTORY_REDRAW_SOURCE_ROOT = source_root
-    DIRECTORY_REDRAW_OUTPUT_ROOT = output_root
-
-    if clean_text(queue.get("promptFingerprint")) != canonical_fingerprint({"prompt": prompt}):
-        raise SystemExit("文件夹批量重绘提示词指纹无效")
-
-    keys = set()
-    for index, item in enumerate(queue["items"], start=1):
-        if not isinstance(item, dict):
-            raise SystemExit(f"文件夹批量重绘队列第 {index} 项不是对象")
-        required_item_fields = {
-            "key",
-            "sourceRelativePath",
-            "outputRelativePath",
-            "sourceSnapshot",
-            "prompt",
-            "inputFingerprint",
-        }
-        if set(item) != required_item_fields:
-            raise SystemExit(f"文件夹批量重绘队列第 {index} 项字段无效")
-        key = clean_text(item.get("key"))
-        if not key or key in keys:
-            raise SystemExit(f"文件夹批量重绘任务 key 缺失或重复：{key or index}")
-        keys.add(key)
-        source_relative = str(item.get("sourceRelativePath") or "")
-        output_relative = str(item.get("outputRelativePath") or "")
-        source_parts = safe_relative_parts(source_relative, f"任务 {key} 原图路径")
-        output_parts = safe_relative_parts(output_relative, f"任务 {key} 输出路径")
-        reject_reparse_segments(source_root, source_parts, f"任务 {key} 原图路径")
-        reject_reparse_segments(output_root, output_parts, f"任务 {key} 输出路径")
-        source_path = (source_root.joinpath(*source_parts)).resolve()
-        output_path = (output_root.joinpath(*output_parts)).resolve()
-        if not is_within(source_path, source_root) or not is_within(output_path, output_root):
-            raise SystemExit(f"文件夹批量重绘任务路径越界：{key}")
-        expected_output = PurePosixPath(source_relative).with_suffix(".png").as_posix()
-        if output_relative != expected_output:
-            raise SystemExit(f"文件夹批量重绘输出路径与原图层级不一致：{key}")
-        snapshot = item.get("sourceSnapshot")
-        if (
-            not isinstance(snapshot, dict)
-            or set(snapshot) != {"size", "sha256"}
-            or not isinstance(snapshot.get("size"), int)
-            or snapshot["size"] <= 0
-            or snapshot["size"] > 20 * 1024 * 1024
-            or not is_sha256(snapshot.get("sha256"))
-            or normalize_prompt_text(item.get("prompt")) != prompt
-        ):
-            raise SystemExit(f"文件夹批量重绘任务快照或提示词无效：{key}")
-        expected_input = canonical_fingerprint(
-            {
-                "operation": "directory_redraw",
-                "outputRelativePath": output_relative,
-                "promptFingerprint": queue["promptFingerprint"],
-                "sourceRelativePath": source_relative,
-                "sourceSnapshot": snapshot,
-            }
-        )
-        if clean_text(item.get("inputFingerprint")) != expected_input:
-            raise SystemExit(f"文件夹批量重绘任务输入指纹无效：{key}")
-
-        # Normalize the dedicated queue item into the fields reused by the API executor.
-        item["assetName"] = source_relative
-        item["outputPath"] = output_relative
-        item["references"] = [source_relative]
-        item["referenceSnapshots"] = [
-            {"path": source_relative, "size": snapshot["size"], "sha256": snapshot["sha256"]}
-        ]
-
-    expected_queue_fingerprint = canonical_fingerprint(
-        {
-            "version": 1,
-            "operation": "directory_redraw",
-            "sourceRoot": queue["sourceRoot"],
-            "outputRoot": queue["outputRoot"],
-            "promptFingerprint": queue["promptFingerprint"],
-            "recursive": True,
-            "items": [
-                {
-                    "key": item["key"],
-                    "sourceRelativePath": item["sourceRelativePath"],
-                    "outputRelativePath": item["outputRelativePath"],
-                    "sourceSnapshot": item["sourceSnapshot"],
-                    "inputFingerprint": item["inputFingerprint"],
-                }
-                for item in queue["items"]
-            ],
-            "skipped": queue["skipped"],
-        }
-    )
-    if clean_text(queue.get("queueFingerprint")) != expected_queue_fingerprint:
-        raise SystemExit("文件夹批量重绘队列指纹无效")
-
-
-def validate_new_api_queue_items(queue: dict) -> None:
-    prompt_batch = queue["apiPromptBatch"]
-    operation = queue_operation(queue)
-    try:
-        route_path = resolve_skill_file(queue.get("routingConfig", ""), "routingConfig")
-        routes = read_json(route_path)
-    except (OSError, ValueError, json.JSONDecodeError) as error:
-        raise SystemExit(f"API 出图路由无法读取：{error}") from error
-    if (
-        not isinstance(routes, dict)
-        or routes.get("version") != 1
-        or routes.get("sheetOrder") != list(IMAGE_SHEET_ORDER)
-        or not isinstance(routes.get("routes"), dict)
-        or set(routes["routes"]) != set(IMAGE_SHEET_ORDER)
-    ):
-        raise SystemExit("API 出图路由结构无效")
-
-    route_fingerprints = {}
-    for sheet_name in IMAGE_SHEET_ORDER:
-        route = routes["routes"].get(sheet_name)
-        if not isinstance(route, dict) or set(route) != {"outputFolder"} or not clean_text(
-            route.get("outputFolder")
-        ):
-            raise SystemExit(f"API 出图路由缺少有效分类：{sheet_name}")
-        route_fingerprints[sheet_name] = json_fingerprint(
-            {
-                "sheetName": sheet_name,
-                "route": route,
-                "promptTemplate": prompt_batch["bySheet"][sheet_name],
-            }
-        )
-
-    for item in queue["items"]:
-        sheet_name = item.get("sheetName")
-        if sheet_name not in IMAGE_SHEET_ORDER or not isinstance(item.get("productionNotes"), str):
-            raise SystemExit(f"API 队列项目分类或制作说明无效：{item.get('key', '未知任务')}")
-        expected_prompt = "\n\n".join(
-            part
-            for part in (
-                normalize_prompt_text(prompt_batch["bySheet"][sheet_name]),
-                normalize_prompt_text(item["productionNotes"]),
-            )
-            if part
-        )
-        if not expected_prompt or normalize_prompt_text(item.get("prompt")) != expected_prompt:
-            raise SystemExit(f"API 队列 Prompt 与窗口模板快照不一致：{item.get('key', '未知任务')}")
-
-        expected_asset_fingerprint = json_fingerprint(
-            {
-                "version": 1,
-                "sheetName": clean_text(sheet_name),
-                "assetId": clean_text(item.get("assetId")),
-                "assetName": clean_text(item.get("assetName")),
-                "productionNotes": clean_text(item.get("productionNotes")),
-                "outputPath": clean_text(item.get("outputPath")),
-            }
-        )
-        if clean_text(item.get("assetFingerprint")) != expected_asset_fingerprint:
-            raise SystemExit(f"API 队列资产指纹无效：{item.get('key', '未知任务')}")
-
-        input_payload = {
-            "sheetName": sheet_name,
-            "assetId": item.get("assetId"),
-            "assetName": item.get("assetName"),
-            "productionNotes": item.get("productionNotes"),
-            "prompt": item.get("prompt"),
-            "routeFingerprint": route_fingerprints[sheet_name],
-        }
-        if operation == "reference_redraw":
-            input_payload.update(
-                {
-                    "operation": "reference_redraw",
-                    "references": item.get("references"),
-                    "referenceSnapshots": item.get("referenceSnapshots"),
-                }
-            )
-        expected_input_fingerprint = json_fingerprint(input_payload)
-        if clean_text(item.get("inputFingerprint")) != expected_input_fingerprint:
-            raise SystemExit(f"API 队列输入指纹无效：{item.get('key', '未知任务')}")
-
-
-def load_queue() -> dict:
-    queue = read_json(QUEUE_PATH)
-    if not isinstance(queue, dict):
-        raise SystemExit("出图队列结构无效，请重新建立出图队列")
-    declared_operation = clean_text(queue.get("operation")) or "generate"
-    expected_version = 1 if declared_operation == "directory_redraw" else QUEUE_VERSION
-    if queue.get("version") != expected_version:
-        raise SystemExit("出图队列结构无效，请重新建立出图队列")
-    items = queue.get("items")
-    if not isinstance(items, list):
-        raise SystemExit("出图队列 items 必须是数组")
-    operation = queue_operation(queue)
-    if DIRECTORY_REDRAW_MODE != (operation == "directory_redraw"):
-        raise SystemExit("批量执行模式与队列类型不一致")
-    if ONLY_KEY and operation != "generate":
-        raise SystemExit("--only-key 只适用于普通 API 资产出图")
-    if operation == "directory_redraw":
-        validate_directory_redraw_structure(queue)
-    else:
-        validated_image_root = require_stable_real_directory(
-            IMAGE_OUTPUT_ROOT_PATH,
-            "资产图输出目录",
-        )
-        if os.path.normcase(str(validated_image_root)) != os.path.normcase(
-            str(IMAGE_OUTPUT_ROOT)
-        ):
-            raise SystemExit("资产图输出目录真实路径已变化，请重新建立出图队列")
-        required_root = (
-            "builtAt",
-            "routingFingerprint",
-            "eligibilityFingerprint",
-        )
-        if any(not clean_text(queue.get(field)) for field in required_root):
-            raise SystemExit("出图队列尚未建立，请先运行 build_image_queue.mjs")
-    if operation == "reference_redraw":
-        validate_reference_redraw_structure(queue)
-    elif operation != "directory_redraw" and "referenceRedraw" in queue:
-        raise SystemExit("普通出图队列不应包含 referenceRedraw 元数据")
-    prompt_batch_valid = operation != "directory_redraw" and valid_api_prompt_batch(queue)
-    if operation != "directory_redraw" and not prompt_batch_valid:
-        old_progress = read_json(PROGRESS_PATH, fallback={"items": {}})
-        old_items = old_progress.get("items", {}) if isinstance(old_progress, dict) else {}
-        queue_items_by_key = {
-            clean_text(item.get("key")): item for item in items if isinstance(item, dict)
-        }
-        has_legacy_api_state = (
-            isinstance(old_progress, dict)
-            and clean_text(old_progress.get("routingFingerprint"))
-            == clean_text(queue.get("routingFingerprint"))
-            and isinstance(old_items, dict)
-            and any(
-                isinstance(state, dict)
-                and state.get("backend") == "api"
-                and state.get("status") in {"generating", "completed", "failed"}
-                and key in queue_items_by_key
-                and clean_text(state.get("inputFingerprint"))
-                == clean_text(queue_items_by_key[key].get("inputFingerprint"))
-                for key, state in old_items.items()
-            )
-        )
-        if not has_legacy_api_state:
-            raise SystemExit("API 提示词模板尚未在 API 批量窗口确认")
-    keys = set()
-    for index, item in enumerate(items, start=1):
-        if not isinstance(item, dict):
-            raise SystemExit(f"出图队列第 {index} 项不是对象")
-        required_item_fields = (
-            ("key", "assetName", "prompt", "outputPath", "inputFingerprint")
-            if operation == "directory_redraw"
-            else ("key", "assetId", "assetName", "prompt", "outputPath", "inputFingerprint")
-        )
-        for field in required_item_fields:
-            if not clean_text(item.get(field)):
-                raise SystemExit(f"出图队列第 {index} 项缺少 {field}")
-        if item["key"] in keys:
-            raise SystemExit(f"出图队列存在重复 key：{item['key']}")
-        keys.add(item["key"])
-        resolve_output(item["outputPath"])
-        references = item.get("references", [])
-        if not isinstance(references, list) or any(not isinstance(value, str) for value in references):
-            raise SystemExit(f"任务 {item['key']} references 必须是字符串数组")
-    if prompt_batch_valid:
-        validate_new_api_queue_items(queue)
-    return queue
-
-
-def resolve_skill_file(relative_path: str, label: str) -> Path:
-    if not clean_text(relative_path):
-        raise ValueError(f"{label} path is empty")
-    target = (SKILL_ROOT / relative_path).resolve()
-    try:
-        common = Path(os.path.commonpath([str(target), str(SKILL_ROOT)]))
-    except ValueError as error:
-        raise ValueError(f"{label} path escapes Skill root: {relative_path}") from error
-    if os.path.normcase(str(common)) != os.path.normcase(str(SKILL_ROOT)):
-        raise ValueError(f"{label} path escapes Skill root: {relative_path}")
-    return target
-
-
-def resolve_reference_file(relative_path: str) -> Path:
-    if not DIRECTORY_REDRAW_MODE:
-        return resolve_skill_file(relative_path, "reference")
-    if DIRECTORY_REDRAW_SOURCE_ROOT is None:
-        raise ValueError("directory redraw source root is not configured")
-    parts = safe_relative_parts(relative_path, "批量重绘原图路径")
-    target = DIRECTORY_REDRAW_SOURCE_ROOT.joinpath(*parts).resolve()
-    if not is_within(target, DIRECTORY_REDRAW_SOURCE_ROOT):
-        raise ValueError(f"reference path escapes configured source root: {relative_path}")
-    return target
-
-
-def file_sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def reference_freshness_errors(queue: dict) -> list[str]:
-    if queue_operation(queue) not in {"reference_redraw", "directory_redraw"}:
-        return []
-    errors = []
-    for item in queue.get("items", []):
-        key = clean_text(item.get("key")) or "未知任务"
-        references = item.get("references", [])
-        snapshots = item.get("referenceSnapshots", [])
-        if len(references) != 1 or len(snapshots) != 1:
-            errors.append(f"{key} 原图结构无效")
-            continue
-        snapshot = snapshots[0]
-        try:
-            reference = resolve_reference_file(references[0])
-            stat = reference.stat()
-            if not reference.is_file():
-                errors.append(f"{key} 原图不是文件")
-                continue
-            if stat.st_size != snapshot.get("size"):
-                errors.append(f"{key} 原图大小已变化")
-                continue
-            if cached_file_sha256(reference) != snapshot.get("sha256"):
-                errors.append(f"{key} 原图内容已变化")
-                continue
-            if not valid_reference_image(reference):
-                errors.append(f"{key} 原图不是支持的有效图片")
-        except (OSError, ValueError) as error:
-            errors.append(f"{key} 原图无法读取：{error}")
-    return errors
-
-
-def queue_freshness_errors(queue: dict) -> list[str]:
-    if queue_operation(queue) == "directory_redraw":
-        errors = reference_freshness_errors(queue)
-        if DIRECTORY_REDRAW_OUTPUT_ROOT is None or not DIRECTORY_REDRAW_OUTPUT_ROOT.is_dir():
-            errors.append("批量重绘结果目录不存在")
-        return list(dict.fromkeys(errors))
-
-    errors = []
-    pending_path = CACHE_DIR / "待确认记录.json"
-    try:
-        if file_sha256(pending_path) != queue.get("eligibilityFingerprint"):
-            errors.append("待确认记录已变化")
-    except OSError:
-        errors.append("待确认记录不存在或无法读取")
-
-    # 旧队列的最终 Prompt 与输出路径已经冻结在每个任务中。它记录的前缀、
-    # 风格锚点等外部文件已退出新流程，恢复或重试旧远端任务时不应再依赖它们。
-    if valid_api_prompt_batch(queue):
-        resources = queue.get("routingResourceFingerprints")
-        if not isinstance(resources, dict) or not resources:
-            errors.append("队列缺少路由资源指纹")
-        else:
-            for relative_path, expected in resources.items():
-                try:
-                    resource = resolve_skill_file(relative_path, "routing resource")
-                    if file_sha256(resource) != expected:
-                        errors.append(f"出图路由资源已变化：{relative_path}")
-                except (OSError, ValueError):
-                    errors.append(f"出图路由资源缺失：{relative_path}")
-
-    errors.extend(reference_freshness_errors(queue))
-    return list(dict.fromkeys(errors))
-
-
-def queue_execution_fingerprint(queue: dict) -> str:
-    item_payloads = []
-    for item in queue.get("items", []):
-        payload = {
-            "key": item.get("key"),
-            "inputFingerprint": item.get("inputFingerprint"),
-            "prompt": item.get("prompt"),
-            "outputPath": item.get("outputPath"),
-        }
-        if "references" in item:
-            payload["references"] = item.get("references")
-        if "referenceSnapshots" in item:
-            payload["referenceSnapshots"] = item.get("referenceSnapshots")
-        item_payloads.append(payload)
-    payload = {
-        "builtAt": queue.get("builtAt"),
-        "routingFingerprint": queue.get("routingFingerprint"),
-        "eligibilityFingerprint": queue.get("eligibilityFingerprint"),
-        "apiExecutionFingerprint": api_execution_fingerprint(),
-        "items": item_payloads,
-    }
-    if "operation" in queue:
-        payload["operation"] = queue.get("operation")
-    if "referenceRedraw" in queue:
-        payload["referenceRedraw"] = queue.get("referenceRedraw")
-    if queue_operation(queue) == "directory_redraw":
-        payload["directoryRedraw"] = {
-            field: queue.get(field)
-            for field in (
-                "batchId",
-                "sourceRoot",
-                "outputRoot",
-                "promptFingerprint",
-                "queueFingerprint",
-            )
-        }
-    if isinstance(queue.get("apiPromptBatch"), dict):
-        payload["apiPromptBatch"] = queue["apiPromptBatch"]
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def api_execution_fingerprint() -> str:
-    payload = {
-        "baseUrl": BASE_URL,
-        "projectId": PROJECT_ID,
-        "modelId": MODEL_ID,
-        "aspectRatio": DEFAULT_ASPECT_RATIO,
-        "imageSize": DEFAULT_IMAGE_SIZE,
-    }
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def lock_file_handle(handle) -> None:
@@ -1231,336 +419,6 @@ def progress_has_remote_tasks(store) -> bool:
     )
 
 
-def read_json_response(response):
-    raw = read_limited_bytes(
-        response,
-        MAX_API_JSON_RESPONSE_BYTES,
-        "API JSON response",
-    )
-    return decode_strict_json_bytes(raw, "API JSON response")
-
-
-def open_json(request: Request, timeout=120):
-    try:
-        with API_OPENER.open(request, timeout=timeout) as response:
-            return response.status, read_json_response(response)
-    except HTTPError as error:
-        try:
-            raw = read_limited_bytes(
-                error,
-                MAX_API_ERROR_RESPONSE_BYTES,
-                "API error response",
-            ).decode("utf-8", errors="strict")
-        except ResponseTooLargeError as limit_error:
-            raise APIError(
-                error.code,
-                {
-                    "error_code": "api.response_too_large",
-                    "message": str(limit_error),
-                },
-            ) from error
-        except UnicodeDecodeError as decode_error:
-            raise APIError(
-                502,
-                {
-                    "error_code": "api.invalid_json_response",
-                    "message": "API error response is not valid UTF-8",
-                },
-            ) from decode_error
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            payload = {"message": raw.strip()}
-        raise APIError(error.code, payload) from error
-    except ResponseTooLargeError as error:
-        raise APIError(
-            502,
-            {
-                "error_code": "api.response_too_large",
-                "message": str(error),
-            },
-        ) from error
-    except InvalidJsonResponseError as error:
-        raise APIError(
-            502,
-            {
-                "error_code": "api.invalid_json_response",
-                "message": str(error),
-            },
-        ) from error
-    except (URLError, TimeoutError, OSError) as error:
-        raise NetworkError(str(error)) from error
-
-
-def json_request(method: str, path: str, token=None, payload=None, timeout=120):
-    headers = {"Accept": "application/json"}
-    data = None
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    if payload is not None:
-        headers["Content-Type"] = "application/json"
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = Request(API_URL + path, data=data, headers=headers, method=method)
-    return open_json(request, timeout=timeout)
-
-
-def login() -> str:
-    _, payload = json_request(
-        "POST",
-        "/auth/login",
-        payload={"username": USERNAME, "password": PASSWORD},
-    )
-    token = clean_text(payload.get("token")) if isinstance(payload, dict) else ""
-    if not token:
-        raise RuntimeError("登录响应缺少 token")
-    return token
-
-
-class AuthSession:
-    def __init__(self):
-        self._mutex = threading.Lock()
-        self._token = login()
-
-    def token(self) -> str:
-        with self._mutex:
-            return self._token
-
-    def refresh(self, stale_token: str) -> str:
-        with self._mutex:
-            if self._token == stale_token:
-                self._token = login()
-            return self._token
-
-    def request(self, method: str, path: str, payload=None, timeout=120):
-        token = self.token()
-        try:
-            return json_request(method, path, token, payload, timeout)
-        except APIError as error:
-            if error.status != 401:
-                raise
-            token = self.refresh(token)
-            return json_request(method, path, token, payload, timeout)
-
-
-def upload_image(auth: AuthSession, file_name: str) -> str:
-    path = resolve_reference_file(file_name)
-    if not path.is_file():
-        raise FileNotFoundError(f"参考图不存在：{path}")
-    image_bytes = read_stable_reference_bytes(path)
-    if image_bytes is None:
-        raise ValueError(f"参考图无效、为空或超过 20MB：{path}")
-    boundary = "----IntinifyCanvas" + uuid.uuid4().hex
-    mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    safe_name = path.name.replace('"', "")
-    prefix = (
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="project_id"\r\n\r\n'
-        f"{PROJECT_ID}\r\n"
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'
-        f"Content-Type: {mime_type}\r\n\r\n"
-    ).encode("utf-8")
-    suffix = f"\r\n--{boundary}--\r\n".encode("ascii")
-    body = prefix + image_bytes + suffix
-    token = auth.token()
-    for attempt in range(2):
-        request = Request(
-            API_URL + "/images/upload",
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/json",
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-            },
-        )
-        try:
-            _, payload = open_json(request)
-            break
-        except APIError as error:
-            if error.status != 401 or attempt:
-                raise
-            token = auth.refresh(token)
-    image_url = clean_text(payload.get("url")) if isinstance(payload, dict) else ""
-    if not image_url:
-        raise RuntimeError("参考图上传响应缺少 url")
-    return image_url
-
-
-def submit_task(auth: AuthSession, item: dict, reference_urls: list[str], request_id: str) -> str:
-    payload = {
-        "model_id": MODEL_ID,
-        "prompt": item["prompt"],
-        "aspect_ratio": clean_text(item.get("aspectRatio")) or DEFAULT_ASPECT_RATIO,
-        "image_size": clean_text(item.get("imageSize")) or DEFAULT_IMAGE_SIZE,
-        "project_id": PROJECT_ID,
-        "request_id": request_id,
-        "async": True,
-    }
-    if reference_urls:
-        payload["images"] = reference_urls
-    _, response = auth.request("POST", "/ai/image-gen", payload)
-    task_id = clean_text(response.get("task_id")) if isinstance(response, dict) else ""
-    if not task_id:
-        raise RuntimeError("生图提交响应缺少 task_id")
-    return task_id
-
-
-def wait_for_result(
-    auth: AuthSession,
-    task_id: str,
-    on_status,
-    timeout_seconds=16 * 60,
-    allow_initial_not_found=False,
-    not_found_means_not_created=True,
-):
-    deadline = time.monotonic() + timeout_seconds
-    missing_delays = [1, 2, 4, 8, 15] if allow_initial_not_found else None
-    while time.monotonic() < deadline:
-        try:
-            status, payload = auth.request("GET", f"/ai/task-result/{task_id}")
-        except APIError as error:
-            if error.status != 404 or missing_delays is None:
-                raise
-            on_status("submission_visibility_check", None)
-            if not missing_delays:
-                if not_found_means_not_created:
-                    raise SubmissionNotFound(
-                        f"submission {task_id} was not found after repeated checks"
-                    ) from error
-                raise
-            time.sleep(missing_delays.pop(0))
-            continue
-        remote_status = clean_text(payload.get("status")) if isinstance(payload, dict) else ""
-        queue_position = payload.get("queue_position") if isinstance(payload, dict) else None
-        on_status(remote_status or ("processing" if status == 202 else "unknown"), queue_position)
-        if status == 200 and remote_status == "completed":
-            return payload
-        if status == 200 and remote_status in {"failed", "cancelled", "expired"}:
-            raise APIError(500, payload)
-        if status != 202:
-            raise RuntimeError(f"unexpected task response: {status} {payload}")
-        time.sleep(3)
-    raise TimeoutError(f"task {task_id} exceeded {timeout_seconds} seconds")
-
-
-def same_origin_image_url(image_url: str, current_url: str | None = None) -> str:
-    return same_origin_url(image_url, BASE_URL, current_url)
-
-
-API_OPENER = build_opener(proxy_handler(), SameOriginRedirectHandler(BASE_URL))
-IMAGE_OPENER = build_opener(proxy_handler(), SameOriginRedirectHandler(BASE_URL))
-
-
-def download_image(
-    image_url: str,
-    output_path: Path,
-    output_baseline: object,
-    on_install_candidate=None,
-) -> None:
-    full_url = same_origin_image_url(image_url)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output_path.with_name(
-        f".{output_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-    )
-    request = Request(full_url, headers={"Accept": "image/png,image/*;q=0.8"})
-    try:
-        try:
-            response = IMAGE_OPENER.open(request, timeout=120)
-        except HTTPError as error:
-            if error.code in {408, 425, 429, 500, 502, 503, 504}:
-                raise NetworkError(f"image download HTTP {error.code}") from error
-            raise RuntimeError(f"image download HTTP {error.code}") from error
-        except (URLError, TimeoutError, OSError) as error:
-            raise NetworkError(str(error)) from error
-        with response, temporary.open("wb") as output:
-            if not response.headers.get_content_type().startswith("image/"):
-                raise RuntimeError(f"{image_url} did not return an image")
-            copy_limited_response(
-                response,
-                output,
-                MAX_IMAGE_RESPONSE_BYTES,
-                "image download",
-            )
-            output.flush()
-            os.fsync(output.fileno())
-        if not valid_png(temporary):
-            raise RuntimeError(f"{image_url} did not return a PNG image")
-        candidate_snapshot = install_candidate_file_snapshot(temporary)
-        if on_install_candidate is not None:
-            on_install_candidate(image_url, candidate_snapshot)
-        install_downloaded_file_without_overwrite(
-            temporary,
-            output_path,
-            output_baseline,
-        )
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def download_first_valid_image(
-    image_urls: list[str],
-    output_path: Path,
-    output_baseline: object,
-    on_attempt=None,
-    on_install_candidate=None,
-) -> str:
-    deterministic_errors = []
-    uncertain_errors = []
-    for image_url in image_urls:
-        if on_attempt is not None:
-            on_attempt(image_url)
-        try:
-            download_image(
-                image_url,
-                output_path,
-                output_baseline,
-                on_install_candidate=on_install_candidate,
-            )
-            return image_url
-        except OutputConflictError:
-            raise
-        except NetworkError as error:
-            uncertain_errors.append(f"{image_url}: {error}")
-        except Exception as error:
-            deterministic_errors.append(f"{image_url}: {error}")
-    if uncertain_errors:
-        raise NetworkError("; ".join((uncertain_errors + deterministic_errors)[:8]))
-    detail = "; ".join(deterministic_errors[:8]) or "remote task returned no images"
-    raise APIError(
-        500,
-        {
-            "status": "failed",
-            "error_code": "image.no_result",
-            "failure_code": "image.no_result",
-            "message": detail,
-        },
-    )
-
-
-def failure_details(error: Exception, attempts: int) -> dict:
-    code = ""
-    category = ""
-    status = None
-    if isinstance(error, APIError):
-        code = error.code
-        category = error.category
-        status = error.status
-    elif isinstance(error, NetworkError):
-        code = "image.network_error"
-        category = "network"
-    elif isinstance(error, TimeoutError):
-        code = "image.timeout"
-        category = "timeout"
-    retryable = code in RETRYABLE_CODES or status in {408, 425, 429, 500, 502, 503, 504}
-    if code in TERMINAL_CODES or status in {400, 401, 403}:
-        retryable = False
-    return {
-        "failureCode": code,
-        "failureCategory": category,
-        "retryable": retryable,
-        "terminal": (not retryable) or attempts >= MAX_IMAGE_ATTEMPTS,
-    }
 
 
 def current_state_for_item(store: ProgressStore, item: dict) -> dict:
