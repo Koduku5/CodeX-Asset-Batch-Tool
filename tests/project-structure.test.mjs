@@ -39,6 +39,7 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'src/server/codex-agent/thread-runner.mjs',
     'src/server/codex-agent/worker-runtime.mjs',
     'src/server/codex-agent-chat/contracts.mjs',
+    'src/server/codex-imagegen-handoff/contracts.mjs',
     'src/server/prompt-branch-classification/contracts.mjs',
     'src/server/codex-agent/build-world-overview.mjs',
     'src/server/codex-agent/complete-asset-visual-specs.mjs',
