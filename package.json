@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "KA Asset Batch 的单窗口生产控制与 Prompt Studio 功能原型",
+  "description": "KA Asset Batch 单窗口剧本资产生产与 Prompt Studio 桌面工具",
   "scripts": {
     "start": "node src/server/server.mjs",
     "dev": "node tools/dev.mjs",

@@ -22,6 +22,24 @@
 - 新流水线动作：`engine/scripts/`，由 `src/server/pipeline-task-runner.mjs` 固定注册；禁止接受网页传入任意命令或路径。
 - 新提示词资源：`engine/assets/图片生成/prompts/`，继续遵守 Catalog schema、版本、指纹和迁移契约。
 
+## 模块化边界
+
+- 可执行入口保持薄层：解析参数、装配依赖、调用领域模块并映射退出码；业务校验不得重新堆回入口。
+- `engine/scripts/lib/api_batch/` 分别负责队列契约、远端传输、文件安装安全、单项状态机、批次锁与并发调度。
+- `pipeline_protocol.py` 与 `pipeline_runtime.mjs` 是稳定兼容门面；新增实现进入各自领域模块，不扩大门面。
+- Node 服务由 `server.mjs`、`server-services.mjs`、`server-http.mjs` 和 `routes/` 组合；领域服务不得反向依赖 HTTP 路由。
+- WPF 使用 partial class 按窗口舞台、桥接脚本、API 批次 RPC 和通用 RPC 契约分离；原生互操作只留在桌面层。
+- React 根入口不保存业务逻辑；工作台副作用进入 hook/controller，视图进入对应 feature，协议校验进入 service adapter。
+
+## 验证门禁
+
+- `npm run check:engine-python`：编译全部 Python 领域模块与薄入口。
+- `npm run check:engine-powershell`：使用 PowerShell AST 解析全部命令脚本，防止 dot-source 模块边界破坏语法。
+- `npm run check:server`：检查 Node 领域模块、门面与适配器语法。
+- `npm run typecheck` 与 `npm run build`：验证 React/TypeScript 和生产 bundle。
+- `npm test`：验证服务、流水线、UI、桌面、安全、打包与性能契约。
+- `npm run check:desktop`：在安装 .NET 10 SDK 的开发机或 CI 中编译 WPF 宿主。
+
 ## 禁止事项
 
 - 不从外部安装包目录动态读取执行代码。

@@ -182,7 +182,7 @@ flowchart TD
 ## 4. 源码目录
 
 ```text
-prompt-studio-prototype/
+CodeX-Asset-Batch-Tool/
 ├─ desktop/                     # .NET 10 WPF + WebView2 薄壳
 │  └─ PromptStudio.Desktop/
 ├─ engine/                      # 正式流水线，运行时不依赖外部安装包
@@ -198,7 +198,7 @@ prompt-studio-prototype/
 │  ├─ server/                   # 本地 API、项目隔离、编排、Catalog、后端服务
 │  └─ ui/
 │     ├─ components/ui/         # shadcn 风格的 Radix UI 原语
-│     ├─ features/              # 可继续拆分的业务视图
+│     ├─ features/              # workbench、Prompt Studio、待确认资产等业务域
 │     ├─ services/              # 前端 DTO 与调用适配器
 │     ├─ App.tsx                # 稳定应用入口
 │     └─ styles/
@@ -220,7 +220,8 @@ prompt-studio-prototype/
 
 ### 5.1 前端
 
-- `src/ui/App.tsx`：监听页、Prompt Studio 舞台、四个工作区和全局状态组合。
+- `src/ui/App.tsx`：稳定应用门面，只导出正式工作台。
+- `src/ui/features/workbench/workbench-app.tsx`：项目、任务、Codex、耗时等领域 hook 与监听页组件的组合层。
 - `src/ui/features/prompt-studio/prompt-field-list.tsx`：以冒号为基准对齐的基础/最终 Prompt 字段列表。
 - `src/ui/services/project-control-adapter.mjs`：项目、剧本和任务 DTO。
 - `src/ui/services/batch-control-adapter.mjs`：参考图、批次、API 后端和队列 DTO。
@@ -228,9 +229,17 @@ prompt-studio-prototype/
 - `src/ui/services/route-module-workbench.mjs`：分支草稿、预设导入导出与冲突模型。
 - `src/ui/services/imagegen-handoff-adapter.mjs`：内置 ImageGen 交接状态。
 
+### 5.2 流水线与服务端
+
+- `engine/scripts/pipeline/`：保持可由命令行直接调用的薄入口与批次编排。
+- `engine/scripts/lib/api_batch/`：API 传输、文件安全、队列契约、单项状态机、批次锁和并发执行。
+- `engine/scripts/lib/pipeline_protocol.py`：锁与可恢复事务的兼容门面；实现分别位于 `pipeline_lock_protocol.py` 和 `pipeline_transaction_protocol.py`。
+- `src/server/server.mjs`：HTTP 服务组合入口；路由、服务装配、任务运行时和各协议契约位于相邻领域目录。
+- `desktop/PromptStudio.Desktop/`：WPF 生命周期、窗口舞台、WebView 桥接脚本与 RPC 领域使用 partial class 分离。
+
 页面使用 React 19、Vite 8、Tailwind CSS 4、Radix UI、Lucide。生产构建把 React、Radix 和图标拆为稳定 vendor chunks，减少主业务包解析压力；长路由列表分页，每页上限 100，10,000 条筛选/分页有性能门禁。
 
-### 5.2 Node sidecar
+### 5.3 Node sidecar
 
 - `software-workspace.mjs`：项目创建、重命名、删除、剧本、运行时快照和安全路径。
 - `project-root-index.mjs`：允许访问的真实项目根索引。
@@ -245,7 +254,7 @@ prompt-studio-prototype/
 - `desktop-entry.mjs`：桌面固定动作和 native 能力。
 - `server.mjs`：loopback HTTP 路由、令牌校验、DTO 边界和静态页面服务。
 
-### 5.3 桌面壳
+### 5.4 桌面壳
 
 - `DesktopPaths.cs`：解析 sidecar、engine、Node 和软件数据根。
 - `DesktopSidecar.cs`：启动随机端口 sidecar、校验 ready/health、退出回收。
