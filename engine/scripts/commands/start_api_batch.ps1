@@ -124,6 +124,8 @@ $apiBatchLibraryRoot = Join-Path $PSScriptRoot 'lib'
 $apiBatchLibraries = @(
   (Join-Path $apiBatchLibraryRoot 'api-batch-contracts.ps1'),
   (Join-Path $apiBatchLibraryRoot 'api-batch-state.ps1'),
+  (Join-Path $apiBatchLibraryRoot 'api-batch-headless.ps1'),
+  (Join-Path $apiBatchLibraryRoot 'api-batch-dialog.ps1'),
   (Join-Path $apiBatchLibraryRoot 'api-batch-form.ps1'),
   (Join-Path $apiBatchLibraryRoot 'api-batch-launch.ps1')
 )

@@ -80,6 +80,8 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'engine/scripts/lib/api_batch/batch_execution.py',
     'engine/scripts/commands/lib/api-batch-contracts.ps1',
     'engine/scripts/commands/lib/api-batch-state.ps1',
+    'engine/scripts/commands/lib/api-batch-headless.ps1',
+    'engine/scripts/commands/lib/api-batch-dialog.ps1',
     'engine/scripts/commands/lib/api-batch-form.ps1',
     'engine/scripts/commands/lib/api-batch-launch.ps1',
     'engine/scripts/commands/check_powershell_syntax.ps1',
