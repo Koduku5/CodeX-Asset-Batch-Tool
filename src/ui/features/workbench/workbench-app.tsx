@@ -6,25 +6,19 @@ import {
   Check,
   CheckCircle2,
   ChevronLeft,
-  ChevronDown,
   ChevronRight,
-  ClipboardCopy,
   Database,
   FileOutput,
-  FileText,
   FolderOpen,
   LoaderCircle,
   Moon,
   Network,
   PanelRightOpen,
-  Pause,
   Pencil,
-  Play,
   Plus,
   RefreshCw,
   Sparkles,
   Sun,
-  Timer,
   Trash2,
   Upload,
   WandSparkles,
@@ -32,34 +26,17 @@ import {
 } from "lucide-react"
 
 import { useTheme } from "@/components/theme-provider"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { PendingAssetDialog } from "@/features/pending-assets/pending-asset-dialog"
+import { AgentChatCard } from "@/features/workbench/agent-chat-card"
+import { WorkbenchPipelineOverview } from "@/features/workbench/workbench-pipeline-overview"
+import { WorkbenchProjectDialogs } from "@/features/workbench/workbench-project-dialogs"
+import { WorkbenchTaskActivity } from "@/features/workbench/workbench-task-activity"
 import { saveStageTimingsWithRetry } from "@/services/stage-timing-persistence.mjs"
 
 import {
@@ -74,8 +51,6 @@ import {
   PHASE_LABELS,
   CURRENT_STAGE_LABELS,
   TASK_STAGE_BY_ACTION,
-  STATE_LABELS,
-  TASK_STATUS_LABELS,
   ACTIVE_TASK_STATUSES,
   safeMessage,
   taskFailureSummary,
@@ -86,7 +61,6 @@ import {
   projectNameFromScreenplay,
   StatusDot,
   SectionHeading,
-  AgentChatCard,
 } from "@/features/workbench/workbench-foundation"
 
 import { MemoPromptStudioDrawer } from "@/features/prompt-studio/prompt-studio-drawer"
@@ -1123,100 +1097,30 @@ export default function App() {
                 </CardContent>
               </Card>
 
-              <div className="flex flex-wrap justify-end gap-2 px-1" aria-label="流水线任务操作">
-                <Button onClick={() => void runTask(startTaskAction)} disabled={!activeProject || activeProjectHasRunningTask || pendingAssetsReady || busyAction === startTaskAction}>
-                  {busyAction === startTaskAction ? <LoaderCircle className="animate-spin" /> : <Play />}{startTaskAction === "finalize-after-confirmation" ? "继续任务" : "开始任务"}
-                </Button>
-                <Button variant="destructive" onClick={() => void pauseCurrentTask()} disabled={!activeProjectHasRunningTask || busyAction === "pause-task"}>
-                  {busyAction === "pause-task" ? <LoaderCircle className="animate-spin" /> : <Pause />}暂停任务
-                </Button>
-              </div>
-
-              <Card className="gap-2.5 overflow-hidden border-border/80 py-4 shadow-panel">
-                <CardHeader className="px-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <CardTitle className="truncate text-xl" aria-live="polite">当前阶段：{currentStageLabel}</CardTitle>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">当前剧本来源：“{screenplaySource}”</p>
-                    </div>
-                    <Badge variant="muted" className="shrink-0">项目用时 {formatDuration(projectElapsedSeconds)}</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3 px-4">
-                  <div className="flex items-center gap-3">
-                    <Progress
-                      value={summaryProgress}
-                      aria-label="当前流水线真实总进度"
-                      aria-valuetext={showSummaryProgressPercent ? `${Math.round(summaryProgress)}%` : "当前阶段正在运行，总进度暂不可精确计算"}
-                      className="h-2.5 flex-1"
-                    />
-                    {showSummaryProgressPercent && (
-                      <span className="w-10 shrink-0 text-right text-[11px] font-medium tabular-nums text-muted-foreground">{Math.round(summaryProgress)}%</span>
-                    )}
-                  </div>
-                  {showVisualSpecsCard && (
-                    <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-xs" aria-live="polite">
-                      <p className="font-semibold text-foreground">当前阶段：资产设定生成中</p>
-                      <p className="mt-1 text-muted-foreground">
-                        正在处理：{visualSpecsTask?.assetId
-                          ? `当前${visualSpecsTask.sheetName ?? "资产"} ${visualSpecsTask.assetId}`
-                          : "正在准备下一项资产"}
-                      </p>
-                    </div>
-                  )}
-                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
-                    {displayPipelineStages.map((stage: JsonRecord) => {
-                      const isRunning = stage.id === activeTaskStageId
-                        && stage.state === "active"
-                        && activeTaskActuallyRunning
-                      const completedElapsedSeconds = activeProjectId
-                        ? stageElapsedSeconds[activeProjectId]?.[String(stage.id)] ?? null
-                        : null
-                      const displayedElapsedSeconds = isRunning
-                        ? activeStageElapsedSeconds
-                        : stage.state === "complete" ? completedElapsedSeconds : null
-
-                      return (
-                        <div
-                          key={stage.id}
-                          className={cn(
-                            "flex min-h-[84px] min-w-0 flex-col rounded-xl border bg-muted/20 px-3 py-3 transition-[border-color,background-color,box-shadow] duration-300",
-                            stage.state === "active" && "border-info/55 bg-info/8 shadow-sm",
-                            stage.state === "complete" && "border-success/60 bg-success/8",
-                          )}
-                        >
-                          <div className="flex min-w-0 items-center gap-2 text-xs font-semibold leading-5 text-foreground">
-                            {isRunning
-                              ? <LoaderCircle className="stage-running-spinner size-4 shrink-0 text-info" aria-label="运行中" />
-                              : <StatusDot state={stage.state} />}
-                            <span className="min-w-0 truncate">{stage.label}</span>
-                          </div>
-                          <div className="mt-auto flex min-w-0 items-center gap-2 text-[11px] leading-none text-muted-foreground">
-                            <span className="min-w-0 flex-1 truncate">{STATE_LABELS[stage.state] ?? "未开始"}</span>
-                            {displayedElapsedSeconds !== null && (
-                              <span
-                                className={cn(
-                                  "flex shrink-0 items-center gap-1 font-medium tabular-nums",
-                                  isRunning ? "text-info" : "text-muted-foreground",
-                                )}
-                                aria-label={`${stage.label}${isRunning ? "已运行" : "用时"} ${formatDuration(displayedElapsedSeconds)}`}
-                              >
-                                <Timer className="size-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-                                {formatDuration(displayedElapsedSeconds)}
-                              </span>
-                            )}
-                            {stage.state === "complete" && (
-                              <span className="grid size-4.5 shrink-0 place-items-center rounded-full border border-success/70 text-success" aria-label="此阶段已完成">
-                                <Check className="size-2.5" strokeWidth={2} aria-hidden="true" />
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
+              <WorkbenchPipelineOverview
+                studio={{
+                  activeProjectAvailable: Boolean(activeProject),
+                  activeProjectHasRunningTask,
+                  activeProjectId,
+                  activeStageElapsedSeconds,
+                  activeTaskActuallyRunning,
+                  activeTaskStageId,
+                  busyAction,
+                  currentStageLabel,
+                  displayPipelineStages,
+                  pause: () => void pauseCurrentTask(),
+                  pendingAssetsReady,
+                  projectElapsedSeconds,
+                  screenplaySource,
+                  showSummaryProgressPercent,
+                  showVisualSpecsCard,
+                  stageElapsedSeconds,
+                  start: () => void runTask(startTaskAction),
+                  startTaskAction,
+                  summaryProgress,
+                  visualSpecsTask,
+                }}
+              />
 
               {pendingAssetCount > 0 && (
                 <button type="button" onClick={() => setPendingAssetDialogOpen(true)} disabled={!activeProject} className="group flex w-full flex-col gap-4 rounded-xl border border-warning/55 bg-warning/8 p-4 text-left transition-[border-color,background-color,box-shadow] hover:border-warning hover:bg-warning/12 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50 sm:flex-row sm:items-center sm:justify-between" aria-label={`打开 ${pendingAssetCount} 项待确认资产`}>
@@ -1259,59 +1163,22 @@ export default function App() {
                 </div>
               </button>
 
-              <Card className="gap-0 py-0 shadow-panel">
-                <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-                  <Button variant="ghost" size="sm" className="min-w-0 flex-1 justify-start px-1" onClick={() => setTaskLogOpen((open) => !open)} aria-expanded={taskLogOpen} aria-controls="active-task-log">
-                    {activeTask && ACTIVE_TASK_STATUSES.has(String(activeTask.status))
-                      ? <LoaderCircle className="size-4 animate-spin text-primary" />
-                      : activeTask?.status === "succeeded"
-                        ? <CheckCircle2 className="size-4 text-success" />
-                        : activeTask?.status === "paused"
-                          ? <Pause className="size-4 text-warning" />
-                          : activeTask?.status === "failed"
-                            ? <AlertTriangle className="size-4 text-destructive" />
-                            : <FileText className="size-4 text-muted-foreground" />}
-                    <span className="truncate text-xs font-semibold">开发者日志</span>
-                    <ChevronDown className={cn("ml-auto size-4 transition-transform", taskLogOpen && "rotate-180")} />
-                  </Button>
-                  <Badge variant={activeTask?.status === "succeeded" ? "success" : activeTask?.status === "failed" ? "destructive" : ["paused", "pausing"].includes(String(activeTask?.status)) ? "warning" : activeTask ? "info" : "muted"}>
-                    {activeTask ? TASK_STATUS_LABELS[activeTask.status] ?? activeTask.status : "暂无任务"}
-                  </Badge>
-                  {taskLogOpen && <Button variant="outline" size="sm" onClick={() => void copyTaskLog()} disabled={!activeTask?.log?.text}><ClipboardCopy />复制日志</Button>}
-                </div>
-                {taskLogOpen && (
-                  <CardContent id="active-task-log" className="space-y-2 border-t px-3 py-3">
-                    {activeTask ? (
-                      <>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
-                          <span>任务号 {activeTask.taskId}</span>
-                          <span>退出码 {activeTask.exitCode ?? "—"}</span>
-                          {activeTask.log?.truncated && <span className="text-warning">早期日志已截断</span>}
-                        </div>
-                        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/55 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">{activeTask.log?.text || "任务已启动，等待日志…"}</pre>
-                      </>
-                    ) : (
-                      <p className="py-2 text-xs text-muted-foreground">暂无任务日志，开始任务后将在这里显示。</p>
-                    )}
-                  </CardContent>
-                )}
-              </Card>
-
-              {activeTask?.status === "failed" && !dismissedFailureTaskIds.includes(String(activeTask.taskId)) && (
-                <div role="alert" className="flex flex-col gap-3 rounded-xl border border-destructive/55 bg-destructive/8 p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex min-w-0 gap-3">
-                    <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-destructive">流水线执行失败</p>
-                      <p className="mt-1 break-words text-xs text-foreground">{taskFailureSummary(activeTask)}</p>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button variant="outline" size="sm" className="border-destructive/35" onClick={() => setTaskLogOpen(true)}>展开任务日志</Button>
-                    <Button variant="ghost" size="icon-sm" onClick={() => setDismissedFailureTaskIds((ids) => [...new Set([...ids, String(activeTask.taskId)])])} aria-label="关闭错误提示"><X /></Button>
-                  </div>
-                </div>
-              )}
+              <WorkbenchTaskActivity
+                studio={{
+                  activeTask,
+                  copyLog: () => void copyTaskLog(),
+                  dismissFailure: () => {
+                    if (activeTask) {
+                      setDismissedFailureTaskIds((ids) => [...new Set([...ids, String(activeTask.taskId)])])
+                    }
+                  },
+                  failureDismissed: activeTask
+                    ? dismissedFailureTaskIds.includes(String(activeTask.taskId))
+                    : false,
+                  open: taskLogOpen,
+                  setOpen: setTaskLogOpen,
+                }}
+              />
 
               <div className="flex items-center gap-2 rounded-lg border border-info/25 bg-info/8 px-3 py-2 text-[11px] text-muted-foreground"><Database className="size-3.5 text-info" /><span>项目隔离已启用；切换项目不会混用 Cache、输出、队列或锁。</span></div>
             </div>
@@ -1364,70 +1231,33 @@ export default function App() {
         notify={notify}
       />
 
-      <Dialog open={newProjectOpen} onOpenChange={setNewProjectOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>新建独立项目</DialogTitle>
-            <DialogDescription>软件会创建独立目录、Cache、输出、队列和锁。</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="new-project-name">项目名称</Label>
-            <Input id="new-project-name" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void createProject()} autoFocus />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNewProjectOpen(false)}>取消</Button>
-            <Button onClick={() => void createProject()} disabled={!newProjectName.trim() || busyAction === "create-project"}>{busyAction === "create-project" && <LoaderCircle className="animate-spin" />}创建项目</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={renameProjectOpen} onOpenChange={setRenameProjectOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>重命名当前项目</DialogTitle>
-            <DialogDescription>只修改项目显示名称，不改变项目唯一编号、目录、Cache、输出或队列位置。</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="rename-project-name">新的项目名称</Label>
-            <Input
-              id="rename-project-name"
-              value={renameProjectName}
-              onChange={(event) => setRenameProjectName(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && void renameCurrentProject()}
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameProjectOpen(false)}>取消</Button>
-            <Button onClick={() => void renameCurrentProject()} disabled={!renameProjectName.trim() || busyAction === "rename-project"}>
-              {busyAction === "rename-project" && <LoaderCircle className="animate-spin" />}
-              确认重命名
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={deleteProjectOpen} onOpenChange={setDeleteProjectOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除项目“{activeProject?.displayName ?? ""}”？</AlertDialogTitle>
-            <AlertDialogDescription>
-              这会永久删除该项目的独立目录，以及其中的剧本、Cache、输出和队列。此操作无法撤销。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busyAction === "delete-project"}>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(event) => { event.preventDefault(); void deleteCurrentProject() }}
-              disabled={!activeProjectIsIsolated || activeProjectHasRunningTask || busyAction === "delete-project"}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {busyAction === "delete-project" && <LoaderCircle className="animate-spin" />}
-              永久删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <WorkbenchProjectDialogs
+        studio={{
+          busyAction,
+          create: {
+            open: newProjectOpen,
+            name: newProjectName,
+            setOpen: setNewProjectOpen,
+            setName: setNewProjectName,
+            submit: () => void createProject(),
+          },
+          rename: {
+            open: renameProjectOpen,
+            name: renameProjectName,
+            setOpen: setRenameProjectOpen,
+            setName: setRenameProjectName,
+            submit: () => void renameCurrentProject(),
+          },
+          remove: {
+            open: deleteProjectOpen,
+            projectName: activeProject?.displayName ?? "",
+            projectIsIsolated: activeProjectIsIsolated,
+            projectHasRunningTask: activeProjectHasRunningTask,
+            setOpen: setDeleteProjectOpen,
+            submit: () => void deleteCurrentProject(),
+          },
+        }}
+      />
 
       {toast && (
         <div role={toast.tone === "error" ? "alert" : "status"} aria-live={toast.tone === "error" ? "assertive" : "polite"} className={cn(

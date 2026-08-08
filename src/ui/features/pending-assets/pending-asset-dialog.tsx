@@ -4,8 +4,6 @@ import {
   CheckCircle2,
   ChevronRight,
   GitMerge,
-  Lock,
-  LockOpen,
   LoaderCircle,
   RefreshCw,
   Split,
@@ -14,7 +12,6 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -23,7 +20,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -33,208 +29,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
+import {
+  CATEGORY_LABELS,
+  SUBJECT_CATEGORIES,
+  cloneRecord,
+  compatibleTargets,
+  decisionResolution,
+  editableRecord,
+  independentRecord,
+  safeMessage,
+  type Decision,
+  type JsonRecord,
+} from "@/features/pending-assets/pending-asset-model"
+import {
+  FinalRecordEditor,
+  RecordPreview,
+} from "@/features/pending-assets/pending-asset-records"
 import { cn } from "@/lib/utils"
 
 import { PendingAssetAdapter } from "../../services/pending-asset-adapter.mjs"
 
-type JsonRecord = Record<string, any>
-type Decision = "independent" | "merge" | "exclude" | ""
-
 const adapter = new PendingAssetAdapter()
-const CATEGORY_LABELS: Record<string, string> = {
-  characters: "角色",
-  creatures: "生物",
-  extras: "群演",
-  scenes: "场景",
-  props: "道具",
-}
-const SUBJECT_CATEGORIES = new Set(["characters", "creatures", "extras"])
-
-const cloneRecord = (value: JsonRecord | null | undefined) => value
-  ? JSON.parse(JSON.stringify(value)) as JsonRecord
-  : null
-
-const editableRecord = (value: JsonRecord | null | undefined) => {
-  const record = cloneRecord(value)
-  if (!record) return null
-  delete record.assetId
-  record.productionNotes = null
-  record.inferenceBasis = null
-  return record
-}
-
-const normalizeIdentity = (value: unknown) => String(value ?? "")
-  .replace(/\s+/gu, "")
-  .toLocaleLowerCase()
-
-const independentRecord = (item: JsonRecord, targets: JsonRecord[]) => {
-  const record = editableRecord(item.draftAsset)
-  if (!record) return null
-  const occupied = new Set(targets.flatMap((target) => {
-    const targetRecord = target.record ?? {}
-    return [targetRecord.assetName, ...(Array.isArray(targetRecord.aliases) ? targetRecord.aliases : [])]
-      .map(normalizeIdentity)
-      .filter(Boolean)
-  }))
-  record.aliases = (Array.isArray(record.aliases) ? record.aliases : [])
-    .filter((alias: string) => !occupied.has(normalizeIdentity(alias)))
-  return record
-}
-
-const decisionResolution = (item: JsonRecord, decision: Decision, target?: JsonRecord | null) => {
-  if (decision === "independent") return `人工选择独立建档：${item.candidate}`
-  if (decision === "merge") return `人工选择合并：${item.candidate} -> ${target?.assetName ?? target?.assetId ?? "未知目标"}`
-  return `人工选择排除：${item.candidate}`
-}
-
-const safeMessage = (error: unknown, fallback: string) => {
-  const message = String((error as JsonRecord)?.message ?? "").trim()
-  return message || fallback
-}
-
-const compatibleTargets = (item: JsonRecord | null, targets: JsonRecord[]) => {
-  if (!item) return []
-  const category = String(item.proposedCategory ?? "")
-  return targets.filter((target) => SUBJECT_CATEGORIES.has(category)
-    ? SUBJECT_CATEGORIES.has(String(target.category))
-    : target.category === category)
-}
-
-function RecordPreview({ title, category, record, empty }: {
-  title: string
-  category?: string
-  record?: JsonRecord | null
-  empty?: string
-}) {
-  return (
-    <Card className="min-w-0 gap-3 py-4">
-      <CardHeader className="px-4">
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <CardTitle className="truncate text-sm">{title}</CardTitle>
-          {category && <Badge variant="outline">{CATEGORY_LABELS[category] ?? category}</Badge>}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3 px-4 text-xs">
-        {!record ? (
-          <p className="py-6 text-center text-muted-foreground">{empty ?? "尚未选择记录"}</p>
-        ) : (
-          <>
-            <div>
-              <p className="text-[10px] font-medium text-muted-foreground">资产名称</p>
-              <p className="mt-1 break-words font-semibold">{record.assetName}</p>
-            </div>
-            {record.assetId && (
-              <div>
-                <p className="text-[10px] font-medium text-muted-foreground">当前 ID</p>
-                <p className="mt-1 font-mono text-[11px]">{record.assetId}</p>
-              </div>
-            )}
-            <div>
-              <p className="text-[10px] font-medium text-muted-foreground">别名</p>
-              <p className="mt-1 break-words">{Array.isArray(record.aliases) && record.aliases.length ? record.aliases.join("、") : "无"}</p>
-            </div>
-            {record.faction && (
-              <div>
-                <p className="text-[10px] font-medium text-muted-foreground">阵营</p>
-                <p className="mt-1 break-words">{record.faction}</p>
-              </div>
-            )}
-            <div>
-              <p className="text-[10px] font-medium text-muted-foreground">剧本事实</p>
-              <p className="mt-1 whitespace-pre-wrap break-words leading-relaxed">{record.scriptSetting}</p>
-            </div>
-            <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-              <span>首次第 {record.firstRequiredEpisode} 集</span>
-              <span>集内顺序 {record.firstRequiredOrder}</span>
-            </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function FinalRecordEditor({ record, category, onChange, errorId }: {
-  record: JsonRecord
-  category: string
-  onChange: (record: JsonRecord) => void
-  errorId?: string
-}) {
-  const [episodeUnlocked, setEpisodeUnlocked] = React.useState(false)
-  const [orderUnlocked, setOrderUnlocked] = React.useState(false)
-  const setField = (field: string, value: unknown) => onChange({ ...record, [field]: value })
-  const setPositiveInteger = (field: string, value: string) => {
-    const parsed = Number(value)
-    setField(field, Number.isSafeInteger(parsed) && parsed > 0 ? parsed : value)
-  }
-  const needsFaction = SUBJECT_CATEGORIES.has(category)
-  return (
-    <fieldset className="space-y-4 rounded-xl border bg-muted/15 p-4" aria-describedby={errorId}>
-      <legend className="px-1 text-sm font-semibold">人工核定最终记录</legend>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="pending-final-name">资产名称</Label>
-          <Input id="pending-final-name" value={String(record.assetName ?? "")} onChange={(event) => setField("assetName", event.target.value)} />
-        </div>
-        {needsFaction && (
-          <div className="space-y-2 sm:col-span-2">
-            <Label htmlFor="pending-final-faction">阵营（必须包含一个“｜”）</Label>
-            <Input id="pending-final-faction" value={String(record.faction ?? "")} onChange={(event) => setField("faction", event.target.value)} />
-          </div>
-        )}
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="pending-final-setting">完整剧本事实</Label>
-          <Textarea id="pending-final-setting" rows={7} value={String(record.scriptSetting ?? "")} onChange={(event) => setField("scriptSetting", event.target.value)} />
-        </div>
-        {episodeUnlocked ? (
-          <div className="space-y-2">
-            <Label htmlFor="pending-final-episode" className="text-destructive"><LockOpen className="size-3.5" aria-hidden="true" />首次需求集数</Label>
-            <Input
-              id="pending-final-episode"
-              type="number"
-              min={1}
-              step={1}
-              inputMode="numeric"
-              value={String(record.firstRequiredEpisode ?? "")}
-              onChange={(event) => setPositiveInteger("firstRequiredEpisode", event.target.value)}
-            />
-          </div>
-        ) : (
-          <button type="button" onClick={() => setEpisodeUnlocked(true)} className="group rounded-lg border bg-muted/35 px-3 py-2.5 text-left transition-[border-color,background-color,box-shadow] hover:border-primary/40 hover:bg-primary/5 hover:shadow-sm" aria-label="解锁修改首次需求集数">
-            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Lock className="size-3 transition-colors group-hover:text-primary" aria-hidden="true" />首次需求集数</span>
-            <span className="mt-1 block text-sm font-medium">第 {record.firstRequiredEpisode} 集</span>
-          </button>
-        )}
-        {orderUnlocked ? (
-          <div className="space-y-2">
-            <Label htmlFor="pending-final-order" className="text-destructive"><LockOpen className="size-3.5" aria-hidden="true" />集内制作顺序</Label>
-            <Input
-              id="pending-final-order"
-              type="number"
-              min={1}
-              step={1}
-              inputMode="numeric"
-              value={String(record.firstRequiredOrder ?? "")}
-              onChange={(event) => setPositiveInteger("firstRequiredOrder", event.target.value)}
-            />
-          </div>
-        ) : (
-          <button type="button" onClick={() => setOrderUnlocked(true)} className="group rounded-lg border bg-muted/35 px-3 py-2.5 text-left transition-[border-color,background-color,box-shadow] hover:border-primary/40 hover:bg-primary/5 hover:shadow-sm" aria-label="解锁修改集内制作顺序">
-            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Lock className="size-3 transition-colors group-hover:text-primary" aria-hidden="true" />集内制作顺序</span>
-            <span className="mt-1 block text-sm font-medium">第 {record.firstRequiredOrder} 顺位</span>
-          </button>
-        )}
-        {(episodeUnlocked || orderUnlocked) && (
-          <p role="alert" className="sm:col-span-2 text-xs leading-relaxed text-destructive">
-            已解锁身份顺序字段。请先回到原剧本逐集核对首次需求集数和该集制作顺序；修改后会重新整理资产 ID 与后续排序。
-          </p>
-        )}
-      </div>
-    </fieldset>
-  )
-}
-
 export function PendingAssetDialog({
   open,
   onOpenChange,

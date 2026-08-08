@@ -23,7 +23,11 @@ const readUiSource = async () => (await readUiFiles()).map(({ source }) => sourc
 
 const readWorkbenchSource = async () => (await Promise.all([
   read('src/ui/features/workbench/workbench-foundation.tsx'),
-  read('src/ui/features/workbench/workbench-app.tsx')
+  read('src/ui/features/workbench/workbench-app.tsx'),
+  read('src/ui/features/workbench/agent-chat-card.tsx'),
+  read('src/ui/features/workbench/workbench-pipeline-overview.tsx'),
+  read('src/ui/features/workbench/workbench-project-dialogs.tsx'),
+  read('src/ui/features/workbench/workbench-task-activity.tsx')
 ])).join('\n');
 
 const readWorkbenchAndStudioSource = async () => (await Promise.all([
@@ -62,8 +66,8 @@ test('React desktop shell preserves the production-first single-column layout', 
   assert.doesNotMatch(app, />流水线操作</u);
   assert.match(app, /runTask\(startTaskAction\)/u);
   assert.ok(app.indexOf('项目任务') < app.indexOf('拖入 TXT / DOCX 剧本'));
-  assert.ok(app.indexOf('拖入 TXT / DOCX 剧本') < app.indexOf('当前阶段：{currentStageLabel}'));
-  assert.ok(app.indexOf('当前阶段：{currentStageLabel}') < app.indexOf('资产拆分概览'));
+  assert.ok(app.indexOf('拖入 TXT / DOCX 剧本') < app.indexOf('<WorkbenchPipelineOverview'));
+  assert.ok(app.indexOf('<WorkbenchPipelineOverview') < app.indexOf('资产拆分概览'));
   assert.match(app, /createProjectFromScreenplay/u);
   assert.match(app, /controlAdapter\.createProject/u);
   assert.match(app, /controlAdapter\.uploadScreenplay\(\{ projectId: created\.projectId/u);
@@ -111,7 +115,8 @@ test('React desktop shell preserves the production-first single-column layout', 
   assert.ok(app.indexOf('title="项目任务"') < taskActions && taskActions < app.indexOf('当前阶段：{currentStageLabel}'));
   assert.doesNotMatch(app, /formatDuration\(snapshot\?\.pipeline\?\.elapsedSeconds\)/u);
   assert.match(app, /startTaskAction = pendingAssetCount === 0 && rawPipelinePhase === "asset-visual-specs"/u);
-  assert.match(app, /disabled=\{!activeProject \|\| activeProjectHasRunningTask \|\| pendingAssetsReady \|\| busyAction === startTaskAction\}/u);
+  assert.match(app, /activeProjectAvailable: Boolean\(activeProject\)/u);
+  assert.match(app, /disabled=\{!activeProjectAvailable \|\| activeProjectHasRunningTask \|\| pendingAssetsReady \|\| busyAction === startTaskAction\}/u);
   assert.match(app, /disabled=\{!activeProjectHasRunningTask \|\| busyAction === "pause-task"\}/u);
   assert.match(app, /暂停任务/u);
   assert.match(app, /pausing: "正在暂停"/u);
@@ -154,6 +159,38 @@ test('React desktop shell preserves the production-first single-column layout', 
   assert.match(app, /codexAgentChatAdapter\.cancelSession/u);
 });
 
+test('pending asset review separates model rules, record editing, and dialog orchestration', async () => {
+  const dialog = await read('src/ui/features/pending-assets/pending-asset-dialog.tsx');
+  const model = await read('src/ui/features/pending-assets/pending-asset-model.ts');
+  const records = await read('src/ui/features/pending-assets/pending-asset-records.tsx');
+
+  assert.match(dialog, /from "@\/features\/pending-assets\/pending-asset-model"/u);
+  assert.match(dialog, /from "@\/features\/pending-assets\/pending-asset-records"/u);
+  assert.doesNotMatch(dialog, /function RecordPreview|function FinalRecordEditor|const compatibleTargets =/u);
+  assert.match(model, /export const compatibleTargets/u);
+  assert.match(records, /export function RecordPreview[\s\S]*export function FinalRecordEditor/u);
+});
+
+test('workbench separates Agent chat and project dialogs from shared foundation and app orchestration', async () => {
+  const app = await read('src/ui/features/workbench/workbench-app.tsx');
+  const foundation = await read('src/ui/features/workbench/workbench-foundation.tsx');
+  const agentChat = await read('src/ui/features/workbench/agent-chat-card.tsx');
+  const pipelineOverview = await read('src/ui/features/workbench/workbench-pipeline-overview.tsx');
+  const projectDialogs = await read('src/ui/features/workbench/workbench-project-dialogs.tsx');
+  const taskActivity = await read('src/ui/features/workbench/workbench-task-activity.tsx');
+
+  assert.match(app, /from "@\/features\/workbench\/agent-chat-card"/u);
+  assert.match(app, /<WorkbenchPipelineOverview/u);
+  assert.match(app, /<WorkbenchProjectDialogs/u);
+  assert.match(app, /<WorkbenchTaskActivity/u);
+  assert.doesNotMatch(foundation, /function AgentChatCard|Agent 输入配置与发送/u);
+  assert.doesNotMatch(app, /<Dialog open=|<AlertDialog open=|<Progress|id="active-task-log"/u);
+  assert.match(agentChat, /export function AgentChatCard/u);
+  assert.match(pipelineOverview, /export function WorkbenchPipelineOverview/u);
+  assert.match(projectDialogs, /export function WorkbenchProjectDialogs/u);
+  assert.match(taskActivity, /export function WorkbenchTaskActivity/u);
+});
+
 test('pipeline summary follows title, screenplay, total progress, visual detail, then six stage cards', async () => {
   const app = await readWorkbenchSource();
   const title = app.indexOf('当前阶段：{currentStageLabel}');
@@ -181,6 +218,9 @@ test('pipeline summary follows title, screenplay, total progress, visual detail,
 test('Prompt Studio React migration keeps the four left modes and test workbenches', async () => {
   const ui = await readUiSource();
   const batchSource = await readComponentSource('BatchStudio');
+  const batchBuiltinSource = await read('src/ui/features/prompt-studio/batch-builtin-workspace.tsx');
+  const batchControllerSource = await read('src/ui/features/prompt-studio/use-batch-studio.ts');
+  const batchToolbarSource = await read('src/ui/features/prompt-studio/batch-studio-toolbar.tsx');
 
   for (const text of [
     '本次批量',
@@ -222,8 +262,8 @@ test('Prompt Studio React migration keeps the four left modes and test workbench
   assert.match(ui, /blankReferenceModes/u);
   assert.match(ui, /changeReferenceMode/u);
   assert.match(ui, /点击可多选图片，或一次拖入多张参考图/u);
-  assert.match(batchSource, /type="file"[^>]*multiple[^>]*onChange=\{\(event\) => void uploadReferences/u);
-  assert.match(batchSource, /uploadReferences\(event\.dataTransfer\.files\)/u);
+  assert.match(batchBuiltinSource, /type="file"[^>]*multiple[^>]*onChange=\{\(event\) => void uploadReferences/u);
+  assert.match(batchBuiltinSource, /uploadReferences\(event\.dataTransfer\.files\)/u);
   assert.doesNotMatch(batchSource, /files\?\.\[0\]/u);
   assert.match(ui, /gap-x-8 gap-y-2/u);
   assert.match(ui, /SelectTrigger className="w-28"/u);
@@ -239,6 +279,17 @@ test('Prompt Studio React migration keeps the four left modes and test workbench
   assert.match(ui, /apiAccessUsername\.trim\(\) !== "admin" \|\| apiAccessPassword !== "123"/u);
   assert.match(ui, /验证 Infinite Canvas API 使用权限/u);
   assert.match(ui, /账号或密码错误，无法使用 Infinite Canvas API/u);
+  assert.match(batchToolbarSource, /<BatchBackendSelector backend=\{backend\} onBackendChange=\{onBackendChange\} \/>/u);
+  assert.doesNotMatch(batchSource, /apiAccess(?:DialogOpen|Username|Password|Error)/u);
+  assert.match(batchSource, /const studio = useBatchStudio/u);
+  assert.match(batchControllerSource, /const apiStudio = useBatchApiStudio/u);
+  assert.match(batchSource, /<BatchApiWorkspace loading=\{loading\} projectId=\{projectId\} studio=\{apiStudio\} \/>/u);
+  assert.match(batchSource, /<BatchBuiltinWorkspace studio=\{builtinStudio\} \/>/u);
+  assert.match(batchSource, /<BatchStudioToolbar/u);
+  assert.doesNotMatch(batchSource, /<BatchBackendSelector/u);
+  assert.doesNotMatch(batchSource, /队列状态/u);
+  assert.doesNotMatch(batchSource, /batchAdapter\.|imagegenAdapter\.|React\.useEffect/u);
+  assert.doesNotMatch(batchSource, /const (?:connectApiCatalog|chooseApiDirectory|startApiBatch)/u);
   assert.match(ui, /openApiBatchSettings/u);
   assert.match(ui, /https:\/\/canvas\.dopamine\.video/u);
   assert.match(ui, /id="api-base-url"/u);
@@ -252,9 +303,9 @@ test('Prompt Studio React migration keeps the four left modes and test workbench
 
 test('prompt fields remain one continuous document with one aligned value start', async () => {
   const fields = await read('src/ui/features/prompt-studio/prompt-field-list.tsx');
-  const drawer = await read('src/ui/features/prompt-studio/prompt-studio-drawer.tsx');
   const templateStudio = await read('src/ui/features/prompt-studio/template-studio.tsx');
   const templateState = await read('src/ui/features/prompt-studio/use-template-studio.ts');
+  const batchConfiguration = await read('src/ui/features/prompt-studio/batch-configuration.mjs');
   const select = await read('src/ui/components/ui/select.tsx');
 
   assert.match(fields, /onReorder\?: \(fromIndex: number, toIndex: number\) => void/u);
@@ -271,7 +322,7 @@ test('prompt fields remain one continuous document with one aligned value start'
   assert.doesNotMatch(fields, /_6\.75rem_2rem/u);
   assert.doesNotMatch(fields, /<Bot|AI 判断\{agentPlaceholders/u);
   assert.doesNotMatch(fields, /border-b/u);
-  assert.match(drawer, /const orderedFields = normalizeTemplateFieldOrder\(resolved\.promptFields, draft\?\.promptFields\)/u);
+  assert.match(batchConfiguration, /const orderedFields = normalizeTemplateFieldOrder\(resolved\.promptFields, draft\?\.promptFields\)/u);
   assert.match(templateState, /setDraftFields\(normalizeTemplateFieldOrder\(resolved\.promptFields, saved\?\.promptFields\)\)/u);
   assert.match(templateStudio, /onReorder=\{reorderField\}/u);
   assert.match(templateStudio, /按住可排序字段的整行即可拖动/u);
@@ -280,6 +331,7 @@ test('prompt fields remain one continuous document with one aligned value start'
 
 test('prompt field rows use long-press sorting while fixed routing fields stay anchored', async () => {
   const fields = await read('src/ui/features/prompt-studio/prompt-field-list.tsx');
+  const fieldDrag = await read('src/ui/features/prompt-studio/use-prompt-field-drag.ts');
   const templateStudio = await read('src/ui/features/prompt-studio/template-studio.tsx');
   const templateState = await read('src/ui/features/prompt-studio/use-template-studio.ts');
   const fieldOrder = await read('src/ui/features/prompt-studio/template-field-order.mjs');
@@ -296,33 +348,38 @@ test('prompt field rows use long-press sorting while fixed routing fields stay a
   assert.match(templateStudio, /Use case 与 Asset type 始终固定在顶部/u);
 
   assert.match(fields, /isReorderLocked\?: \(field: PromptField, index: number\) => boolean/u);
-  assert.match(fields, /const ROW_DRAG_HOLD_MS = \d+/u);
+  assert.match(fields, /const dragController = usePromptFieldDrag/u);
+  assert.match(fieldDrag, /const ROW_DRAG_HOLD_MS = \d+/u);
   assert.match(fields, /const reorderLocked = Boolean\(editable && onReorder && isReorderLocked\?\.\(field, index\)\)[\s\S]*const reorderable = Boolean\(editable && onReorder && !reorderLocked\)/u);
   assert.match(fields, /data-prompt-field-index=\{index\}[\s\S]*data-prompt-field-reorderable=\{reorderable \? "true" : undefined\}[\s\S]*data-prompt-field-reorder-locked=\{reorderLocked \? "true" : undefined\}/u);
-  assert.match(fields, /onPointerDown=\{reorderable \? \(event\) => \{[\s\S]*pendingRowDragRef\.current = pending[\s\S]*window\.setTimeout\([\s\S]*pointerDragIndexRef\.current = index[\s\S]*ROW_DRAG_HOLD_MS\)[\s\S]*\} : undefined\}/u);
-  assert.match(fields, /\(event\.target as HTMLElement\)\.closest\("button, \[role='switch'\]"\)/u);
-  assert.match(fields, /document\.addEventListener\("pointermove", continuePointerDrag, \{ passive: false \}\)/u);
-  assert.match(fields, /elementFromPoint\(event\.clientX, event\.clientY\)[\s\S]*closest\("\[data-prompt-field-index\]"\)/u);
+  assert.match(fields, /onPointerDown=\{reorderable \? \(event\) => startRowDrag\(event, index, field\.label\) : undefined\}/u);
+  assert.match(fieldDrag, /pendingRowDragRef\.current = pending[\s\S]*window\.setTimeout\([\s\S]*pointerDragIndexRef\.current = index[\s\S]*ROW_DRAG_HOLD_MS\)/u);
+  assert.match(fieldDrag, /\(event\.target as HTMLElement\)\.closest\("button, \[role='switch'\]"\)/u);
+  assert.match(fieldDrag, /document\.addEventListener\("pointermove", continuePointerDrag, \{ passive: false \}\)/u);
+  assert.match(fieldDrag, /elementFromPoint\(event\.clientX, event\.clientY\)\?\.closest\("\[data-prompt-field-index\]"\)/u);
 
-  assert.match(fields, /const canReorderField[\s\S]*isReorderLocked\?\.\(fields\[fromIndex\], fromIndex\)[\s\S]*fields\.some\([\s\S]*isReorderLocked\?\.\(field, index\)/u);
-  assert.match(fields, /onKeyDownCapture=\{reorderable \? \(event\) => \{[\s\S]*event\.altKey[\s\S]*\["ArrowUp", "ArrowDown"\][\s\S]*canReorderField\(index, targetIndex\)[\s\S]*onReorder\?\.\(index, targetIndex\)[\s\S]*\} : undefined\}/u);
+  assert.match(fieldDrag, /const canReorderField[\s\S]*isReorderLocked\?\.\(fields\[fromIndex\], fromIndex\)[\s\S]*fields\.some\([\s\S]*isReorderLocked\?\.\(field, index\)/u);
+  assert.match(fieldDrag, /const reorderWithKeyboard[\s\S]*event\.altKey[\s\S]*\["ArrowUp", "ArrowDown"\][\s\S]*canReorderField\(index, targetIndex\)[\s\S]*onReorder\?\.\(index, targetIndex\)/u);
+  assert.doesNotMatch(fields, /pendingRowDragRef|document\.addEventListener\("pointermove"/u);
 });
 
 test('prompt field drag motion follows the pointer, shifts neighbors, and settles accessibly', async () => {
   const fields = await read('src/ui/features/prompt-studio/prompt-field-list.tsx');
+  const fieldDrag = await read('src/ui/features/prompt-studio/use-prompt-field-drag.ts');
 
-  assert.match(fields, /style\.setProperty\("--prompt-field-drag-y", `\$\{nextTranslateY\}px`\)/u);
+  assert.match(fieldDrag, /style\.setProperty\("--prompt-field-drag-y", `\$\{nextTranslateY\}px`\)/u);
   assert.match(fields, /transform: `translate3d\(0, var\(--prompt-field-drag-y, 0px\), 0\) scale\(\$\{reduceMotion \? 1 : 1\.0\d+\}\)`/u);
 
-  assert.match(fields, /if \(label === activeDragLabelRef\.current\) continue[\s\S]*const deltaY = beforeRect\.top - row\.getBoundingClientRect\(\)\.top[\s\S]*row\.style\.transform = `translate3d\(0, \$\{deltaY\}px, 0\)`[\s\S]*window\.requestAnimationFrame\(\(\) => \{[\s\S]*row\.style\.transition = "transform 320ms cubic-bezier\(0\.22, 1, 0\.36, 1\)"[\s\S]*row\.style\.transform = "translate3d\(0, 0, 0\)"/u);
-  assert.match(fields, /activeRow\.style\.transition = "transform 280ms cubic-bezier\(0\.22, 1, 0\.36, 1\)"[\s\S]*activeRow\.style\.removeProperty\("--prompt-field-drag-y"\)/u);
+  assert.match(fieldDrag, /if \(label === activeDragLabelRef\.current\) continue[\s\S]*const deltaY = beforeRect\.top - row\.getBoundingClientRect\(\)\.top[\s\S]*row\.style\.transform = `translate3d\(0, \$\{deltaY\}px, 0\)`[\s\S]*window\.requestAnimationFrame\(\(\) => \{[\s\S]*row\.style\.transition = "transform 320ms cubic-bezier\(0\.22, 1, 0\.36, 1\)"[\s\S]*row\.style\.transform = "translate3d\(0, 0, 0\)"/u);
+  assert.match(fieldDrag, /activeRow\.style\.transition = "transform 280ms cubic-bezier\(0\.22, 1, 0\.36, 1\)"[\s\S]*activeRow\.style\.removeProperty\("--prompt-field-drag-y"\)/u);
 
-  assert.match(fields, /const reduceMotion = window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches[\s\S]*if \(beforeRects && !reduceMotion\)/u);
-  assert.match(fields, /settleWithMotion = currentTransform !== "none"[\s\S]*&& !window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches/u);
+  assert.match(fieldDrag, /const reduceMotion = window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches[\s\S]*if \(beforeRects && !reduceMotion\)/u);
+  assert.match(fieldDrag, /settleWithMotion = currentTransform !== "none" && !window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches/u);
 });
 
 test('AI judgment editor restores opener focus and exposes required validation', async () => {
   const fields = await read('src/ui/features/prompt-studio/prompt-field-list.tsx');
+  const agentDialog = await read('src/ui/features/prompt-studio/prompt-field-agent-dialog.tsx');
 
   assert.match(fields, /const agentEditorTriggerRef = React\.useRef<HTMLButtonElement \| null>\(null\)/u);
   assert.match(fields, /onClick=\{\(event\) => \{[\s\S]*agentEditorTriggerRef\.current = event\.currentTarget[\s\S]*setAgentEditor\(/u);
@@ -330,17 +387,24 @@ test('AI judgment editor restores opener focus and exposes required validation',
   assert.match(fields, /aria-controls=\{agentDecisionActive \? undefined : `\$\{idPrefix\}-agent-dialog`\}/u);
   assert.match(fields, /aria-expanded=\{agentEditor\?\.index === index\}/u);
   assert.match(fields, /aria-label=\{`编辑“\$\{field\.label\}”的 AI 判断需求`\}[\s\S]*requirements: agentPlaceholders\.map/u);
-  assert.match(fields, /这里只修改已有占位符的判断需求；字段中的其他固定文字会原样保留/u);
-  assert.match(fields, /onCloseAutoFocus=\{\(event\) => \{[\s\S]*event\.preventDefault\(\)[\s\S]*agentEditorTriggerRef\.current\?\.focus\(\)/u);
-  assert.match(fields, /const missing = !requirement\.trim\(\)[\s\S]*const invalid = !agentRequirementIsValid\(requirement\)/u);
-  assert.match(fields, /具体判断需求\{agentEditor\.requirements\.length[\s\S]*（必填）/u);
-  assert.match(fields, /value=\{requirement\}[\s\S]*required[\s\S]*aria-invalid=\{invalid\}[\s\S]*aria-describedby=\{`\$\{requirementId\}-help`\}/u);
-  assert.match(fields, /\{missing[\s\S]*请填写具体判断需求；此项为必填。[\s\S]*需求必须是单行文字，且不能包含【】。/u);
-  assert.match(fields, /disabled=\{!agentEditor\?\.requirements\.every\(agentRequirementIsValid\)\}/u);
+  assert.match(fields, /<PromptFieldAgentDialog/u);
+  assert.match(agentDialog, /这里只修改已有占位符的判断需求；字段中的其他固定文字会原样保留/u);
+  assert.match(agentDialog, /onCloseAutoFocus=\{\(event\) => \{[\s\S]*event\.preventDefault\(\)[\s\S]*triggerRef\.current\?\.focus\(\)/u);
+  assert.match(agentDialog, /const missing = !requirement\.trim\(\)[\s\S]*const invalid = !agentRequirementIsValid\(requirement\)/u);
+  assert.match(agentDialog, /具体判断需求\{editor\.requirements\.length[\s\S]*（必填）/u);
+  assert.match(agentDialog, /value=\{requirement\}[\s\S]*required[\s\S]*aria-invalid=\{invalid\}[\s\S]*aria-describedby=\{`\$\{requirementId\}-help`\}/u);
+  assert.match(agentDialog, /\{missing[\s\S]*请填写具体判断需求；此项为必填。[\s\S]*需求必须是单行文字，且不能包含【】。/u);
+  assert.match(agentDialog, /disabled=\{!editor\?\.requirements\.every\(agentRequirementIsValid\)\}/u);
+  assert.doesNotMatch(fields, /<Dialog|onCloseAutoFocus/u);
 });
 
 test('route preset and branch exchange uses desktop save and atomic multi-file conflict review', async () => {
   const app = await readUiSource();
+  const routeSource = await readComponentSource('RouteStudio');
+  const routeDialogs = await read('src/ui/features/prompt-studio/route-studio-dialogs.tsx');
+  const routeImportPlanner = await read('src/ui/features/prompt-studio/route-import-planner.ts');
+  const routePresetActions = await read('src/ui/features/prompt-studio/use-route-preset-actions.ts');
+  const routeController = await read('src/ui/features/prompt-studio/use-route-studio.ts');
 
   assert.match(app, /saveJsonFile\?:/u);
   assert.match(app, /await nativeSave\(\{ suggestedName: safeFilename, jsonText \}\)/u);
@@ -358,6 +422,25 @@ test('route preset and branch exchange uses desktop save and atomic multi-file c
   assert.match(app, /相同并跳过/u);
   assert.match(app, /取消则整批不写入/u);
   assert.match(app, /new Map\(\[\.\.\.preset\.modules, \.\.\.incoming\.modules\]/u);
+  assert.match(routeSource, /<RouteStudioDialogs studio=\{dialogStudio\} \/>/u);
+  assert.match(routeSource, /<RoutePresetsPanel studio=\{presetsPanelStudio\} \/>/u);
+  assert.match(routeSource, /<RouteModuleList studio=\{moduleListStudio\} \/>/u);
+  assert.match(routeSource, /<RouteModuleSettings module=\{module\} commitModule=\{commitModule\} \/>/u);
+  assert.match(routeSource, /<RouteOperationsWorkspace/u);
+  assert.match(routeSource, /<RouteClassificationWorkspace/u);
+  assert.match(routeDialogs, /export function RouteStudioDialogs/u);
+  assert.doesNotMatch(routeSource, /<AlertDialog/u);
+  assert.doesNotMatch(routeSource, /<Dialog open=/u);
+  assert.doesNotMatch(routeSource, /id="route-presets-panel"/u);
+  assert.doesNotMatch(routeSource, /formalModuleIds\.has\(entry\.id\)/u);
+  assert.match(routeSource, /const controller = useRouteStudio\(\{ notify \}\)/u);
+  assert.match(routeController, /const presetActions = useRoutePresetActions/u);
+  assert.match(routeController, /const classificationStudio = useRouteClassification/u);
+  assert.doesNotMatch(routeSource, /React\.useState|React\.useEffect|catalogAdapter\.|routeAdminAdapter\./u);
+  assert.match(routePresetActions, /planRouteImport\(\{ activePreset, files, mode, presets \}\)/u);
+  assert.match(routeImportPlanner, /function planPresetImports/u);
+  assert.match(routeImportPlanner, /function planBranchImports/u);
+  assert.doesNotMatch(routeSource, /parseRouteExchangeArtifact|distinctVersions|createPresetPackage/u);
 });
 
 test('dark route checkboxes keep a high-contrast checked indicator', async () => {
@@ -372,12 +455,14 @@ test('dark route checkboxes keep a high-contrast checked indicator', async () =>
 test('batch classification stays in the formal batch panel and template drafts feed batch overrides', async () => {
   const app = await readUiSource();
   const batchSource = await readComponentSource('BatchStudio');
+  const batchController = await read('src/ui/features/prompt-studio/use-batch-studio.ts');
+  const batchConfiguration = await read('src/ui/features/prompt-studio/batch-configuration.mjs');
   const routeSource = await readComponentSource('RouteStudio');
 
-  assert.match(batchSource, /runTask\("classify-prompt-branches"\)/u);
+  assert.match(batchController, /runTask\("classify-prompt-branches"\)/u);
   assert.doesNotMatch(routeSource, /runTask\("classify-prompt-branches"\)/u);
-  assert.match(batchSource, /readTemplateDraft/u);
-  assert.match(app, /promptOverridesBySheet/u);
+  assert.match(batchConfiguration, /readTemplateDraft/u);
+  assert.match(batchConfiguration, /promptOverridesBySheet/u);
   assert.match(app, /AI 判断.*【由agent 具体判断说明：…】.*普通文字和空值仍按固定配置处理/u);
   assert.match(app, /agentDecisionTags/u);
   assert.match(app, /保留当前草稿/u);
@@ -425,6 +510,9 @@ test('Prompt Studio uses one in-window overlay stage with repeatable open and cl
 
 test('background polling does not repaint heavy Prompt Studio editors while scrolling', async () => {
   const app = await readWorkbenchAndStudioSource();
+  const routeClassification = await read('src/ui/features/prompt-studio/use-route-classification.ts');
+  const routeModuleList = await read('src/ui/features/prompt-studio/route-module-list.tsx');
+  const routeController = await read('src/ui/features/prompt-studio/use-route-studio.ts');
 
   assert.match(app, /(?:export )?const MemoPromptStudioDrawer = React\.memo\(PromptStudioDrawer\)/u);
   assert.match(app, /const MemoBatchStudio = React\.memo\(BatchStudio\)/u);
@@ -444,6 +532,7 @@ test('background polling does not repaint heavy Prompt Studio editors while scro
   assert.match(app, /if \(drawerOpen\) return[\s\S]*setInterval\(\(\) => void refreshProjects\(true\), 3000\)/u);
   assert.match(app, /if \(drawerOpen\) return[\s\S]*workspaceAdapter\.getSnapshot/u);
   assert.match(app, /return unchanged \? current : next/u);
-  assert.match(app, /const availableForScope = React\.useMemo/u);
-  assert.match(app, /formalModuleIds\.has\(entry\.id\)/u);
+  assert.match(routeClassification, /const availableForScope = React\.useMemo/u);
+  assert.match(routeController, /const classificationStudio = useRouteClassification/u);
+  assert.match(routeModuleList, /formalModuleIds\.has\(entry\.id\)/u);
 });
