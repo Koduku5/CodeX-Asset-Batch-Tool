@@ -23,6 +23,13 @@ const readUiSource = async () => (await readUiFiles()).map(({ source }) => sourc
 
 const readWorkbenchSource = async () => (await Promise.all([
   read('src/ui/features/workbench/workbench-foundation.tsx'),
+  read('src/ui/features/workbench/workbench-types.ts'),
+  read('src/ui/features/workbench/workbench-adapters.ts'),
+  read('src/ui/features/workbench/workbench-constants.ts'),
+  read('src/ui/features/workbench/workbench-utils.ts'),
+  read('src/ui/features/workbench/workbench-primitives.tsx'),
+  read('src/ui/features/prompt-studio/prompt-preset-store.tsx'),
+  read('src/ui/features/prompt-studio/batch-custom-fields.ts'),
   read('src/ui/features/workbench/workbench-app.tsx'),
   read('src/ui/features/workbench/use-workbench-codex.ts'),
   read('src/ui/features/workbench/use-workbench-projects.ts'),
@@ -183,6 +190,10 @@ test('pending asset review separates model rules, record editing, and dialog orc
 test('workbench separates Agent chat and project dialogs from shared foundation and app orchestration', async () => {
   const app = await read('src/ui/features/workbench/workbench-app.tsx');
   const foundation = await read('src/ui/features/workbench/workbench-foundation.tsx');
+  const adapters = await read('src/ui/features/workbench/workbench-adapters.ts');
+  const constants = await read('src/ui/features/workbench/workbench-constants.ts');
+  const primitives = await read('src/ui/features/workbench/workbench-primitives.tsx');
+  const promptPresetStore = await read('src/ui/features/prompt-studio/prompt-preset-store.tsx');
   const agentChat = await read('src/ui/features/workbench/agent-chat-card.tsx');
   const pipelineOverview = await read('src/ui/features/workbench/workbench-pipeline-overview.tsx');
   const projectPanel = await read('src/ui/features/workbench/workbench-project-panel.tsx');
@@ -206,7 +217,8 @@ test('workbench separates Agent chat and project dialogs from shared foundation 
   assert.match(app, /useWorkbenchProjects\(\{/u);
   assert.match(app, /useWorkbenchStageTimings\(\{/u);
   assert.match(app, /useWorkbenchTasks\(\{/u);
-  assert.doesNotMatch(foundation, /function AgentChatCard|Agent 输入配置与发送/u);
+  assert.doesNotMatch(foundation, /function AgentChatCard|Agent 输入配置与发送|new ProjectWorkspaceAdapter|export const STYLES|function StatusDot/u);
+  assert.match(foundation, /export \* from "@\/features\/workbench\/workbench-types"[\s\S]*export \* from "@\/features\/prompt-studio\/prompt-preset-store"/u);
   assert.doesNotMatch(app, /<Dialog open=|<AlertDialog open=|<Progress|id="active-task-log"|Codex SDK 授权状态检测|title="项目任务"|saveStageTimingsWithRetry|stageTimingSaveQueues|codexAgentChatAdapter|watchedAgentChatIds|workspaceAdapter\.listProjects|controlAdapter\.createProject|controlAdapter\.getTask|controlAdapter\.listTasks/u);
   assert.match(agentChat, /export function AgentChatCard/u);
   assert.match(pipelineOverview, /export function WorkbenchPipelineOverview/u);
@@ -219,6 +231,10 @@ test('workbench separates Agent chat and project dialogs from shared foundation 
   assert.match(projectController, /export function useWorkbenchProjects[\s\S]*workspaceAdapter\.listProjects\(\)[\s\S]*controlAdapter\.createProject/u);
   assert.match(stageTimings, /export function useWorkbenchStageTimings[\s\S]*saveStageTimingsWithRetry/u);
   assert.match(taskController, /export function useWorkbenchTasks[\s\S]*controlAdapter\.getTask[\s\S]*controlAdapter\.listTasks/u);
+  assert.match(adapters, /export const workspaceAdapter = new ProjectWorkspaceAdapter\(\)[\s\S]*export const routeClassifierAdapter/u);
+  assert.match(constants, /export const STYLES[\s\S]*export const ROUTE_LIST_PAGE_SIZE/u);
+  assert.match(primitives, /export function StatusDot[\s\S]*export function EmptyState/u);
+  assert.match(promptPresetStore, /export function readStoredPresets[\s\S]*export const PromptPresetContext/u);
 });
 
 test('pipeline summary follows title, screenplay, total progress, visual detail, then six stage cards', async () => {
