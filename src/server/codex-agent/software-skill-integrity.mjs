@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { lstat, readFile, realpath } from 'node:fs/promises';
-import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isOutside } from './path-safety.mjs';
 import { workerError } from './worker-errors.mjs';
 
 const MAX_PIPELINE_SKILL_BYTES = 1024 * 1024;
@@ -14,11 +15,6 @@ export const SOFTWARE_PIPELINE_SKILL_PATH = fileURLToPath(
 export const SOFTWARE_EPISODE_ASSET_SKILL_PATH = fileURLToPath(
   new URL('../../../skills/ka-episode-asset-analysis/SKILL.md', import.meta.url)
 );
-
-const isOutside = (root, candidate) => {
-  const value = relative(root, candidate);
-  return value === '..' || value.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(value);
-};
 
 export const inspectSoftwarePipelineSkill = async (pipelineSkillPathInput) => {
   if (typeof pipelineSkillPathInput !== 'string' || !isAbsolute(pipelineSkillPathInput)) {
