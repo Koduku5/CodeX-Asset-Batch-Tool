@@ -34,6 +34,7 @@ test('the product owns its engine, skills, UI, server and desktop boundaries', a
     'src/server/routes/desktop-routes.mjs',
     'src/server/routes/static-route.mjs',
     'src/server/codex-agent/analyze-screenplay.mjs',
+    'src/server/codex-agent-chat/contracts.mjs',
     'src/server/codex-agent/build-world-overview.mjs',
     'src/server/codex-agent/complete-asset-visual-specs.mjs',
     'src/server/codex-agent/contracts.mjs',
